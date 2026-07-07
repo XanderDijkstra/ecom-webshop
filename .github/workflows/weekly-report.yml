@@ -1,0 +1,19 @@
+name: Weekly store report
+
+# Sends the trailing-7-days store report (visitors, carts, checkouts, orders,
+# revenue) to Telegram every Friday morning. 07:00 UTC ≈ 09:00 Norway in
+# summer (08:00 in winter). Requires the CRON_SECRET repo secret and the
+# SITE_URL repo variable (see abandoned-cart.yml).
+on:
+  schedule:
+    - cron: "0 7 * * 5" # Fridays
+  workflow_dispatch: {} # allow manual "Run workflow" from the Actions tab
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger weekly report
+        run: |
+          curl -fsS -X POST "${{ vars.SITE_URL }}/api/cron/weekly-report" \
+            -H "authorization: Bearer ${{ secrets.CRON_SECRET }}"

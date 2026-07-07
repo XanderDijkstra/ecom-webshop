@@ -1,0 +1,22 @@
+name: Abandoned-cart reminder
+
+# Pings the reminder endpoint on a schedule because the Vercel Hobby plan
+# can't run sub-daily crons. The endpoint is idempotent (each cart is emailed
+# at most once), so overlapping/late runs are harmless.
+#
+# Per store, set once:
+#   gh variable set SITE_URL    --body "https://www.yourshop.com"
+#   gh secret   set CRON_SECRET --body "<same value as the Vercel env var>"
+on:
+  schedule:
+    - cron: "*/15 * * * *" # every 15 min (GitHub may delay a few min under load)
+  workflow_dispatch: {} # allow manual "Run workflow" from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger reminder cron
+        run: |
+          curl -fsS -X POST "${{ vars.SITE_URL }}/api/cron/abandoned-cart" \
+            -H "authorization: Bearer ${{ secrets.CRON_SECRET }}"

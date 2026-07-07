@@ -1,0 +1,103 @@
+-- BÆRA webshop — orders table. Run once in the Supabase SQL editor.
+-- Orders are written server-side by the Stripe webhook using the service-role
+-- key, so Row Level Security can stay restrictive (no public access needed).
+
+create table if not exists public.orders (
+  id                 uuid primary key default gen_random_uuid(),
+  stripe_session_id  text unique not null,
+  email              text,
+  customer_name      text,
+  phone              text,
+  amount_total       numeric(12,2),
+  currency           text default 'NOK',
+  payment_status     text,
+  shipping_address   jsonb,
+  items              jsonb,
+  created_at         timestamptz not null default now()
+);
+
+create index if not exists orders_created_at_idx on public.orders (created_at desc);
+
+-- Lock the table down: only the service role (used by the webhook) can touch it.
+alter table public.orders enable row level security;
+-- No policies = no access for anon/authenticated roles. The service-role key
+-- bypasses RLS, so the webhook still writes fine.
+
+
+-- BÆRA webshop — abandoned-checkout reminders.
+-- A row is written (service-role) when a shopper enters their email at /kasse
+-- (/api/cart/track). The cron (/api/cron/abandoned-cart) emails carts that are
+-- >=30 min old, unconverted and un-reminded; recordOrder() marks a row
+-- converted when the matching email pays. One row per email (upsert).
+
+create table if not exists public.abandoned_carts (
+  id                uuid primary key default gen_random_uuid(),
+  email             text unique not null,
+  items             jsonb,
+  subtotal          numeric(12,2),
+  currency          text default 'NOK',
+  consent           boolean not null default false,
+  reminder_sent_at  timestamptz,
+  converted_at      timestamptz,
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now()
+);
+
+-- Speeds up the cron's "due" query (oldest eligible carts first).
+create index if not exists abandoned_carts_due_idx
+  on public.abandoned_carts (updated_at)
+  where reminder_sent_at is null and converted_at is null;
+
+-- Same lockdown as orders: service-role only, no public policies.
+alter table public.abandoned_carts enable row level security;
+
+
+-- BÆRA webshop — first-party funnel analytics.
+-- Anonymous, cookieless visitor events written server-side (service-role) from
+-- /api/analytics for the top of the funnel (PageView, AddToCart,
+-- InitiateCheckout). No PII/IP is stored — only a random first-party visitor id
+-- (so uniques can be counted later), the event name and the path. Fires for
+-- EVERY visitor, independent of the Meta marketing-cookie gate, so the admin
+-- funnel reflects all traffic. The Purchase stage is read from the orders
+-- table, so it isn't duplicated here.
+
+create table if not exists public.funnel_events (
+  id          uuid primary key default gen_random_uuid(),
+  visitor_id  text,
+  name        text not null,
+  path        text,
+  value       numeric(12,2),
+  currency    text default 'NOK',
+  created_at  timestamptz not null default now()
+);
+
+create index if not exists funnel_events_created_idx
+  on public.funnel_events (created_at desc);
+create index if not exists funnel_events_name_created_idx
+  on public.funnel_events (name, created_at desc);
+
+-- Same lockdown as orders: service-role only, no public policies.
+alter table public.funnel_events enable row level security;
+
+
+-- BÆRA webshop — outbound email log.
+-- Every email the store sends (order confirmations, admin alerts, abandoned-
+-- cart reminders) is recorded here by lib/email.ts, including the rendered
+-- HTML, so the admin "Marketing" tab can show what was sent and preview it.
+
+create table if not exists public.email_log (
+  id          uuid primary key default gen_random_uuid(),
+  type        text not null,                 -- order_confirmation | order_admin | cart_reminder
+  recipient   text not null,
+  subject     text,
+  html        text,
+  status      text not null default 'sent',  -- sent | failed
+  error       text,
+  created_at  timestamptz not null default now()
+);
+
+create index if not exists email_log_created_idx
+  on public.email_log (created_at desc);
+
+-- Same lockdown as orders: service-role only, no public policies.
+alter table public.email_log enable row level security;

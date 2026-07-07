@@ -1,0 +1,120 @@
+import { getProduct } from "./products";
+import { ORDER_BUMP, bumpUnitPriceNok } from "./offers";
+
+// Shared server-side cart pricing. Both checkout backends (Stripe Payment
+// Element and Vipps ePayment) price the cart HERE from the catalogue — client
+// amounts are never trusted — so the two flows can never diverge on price.
+
+export interface PriceReqItem {
+  slug: string;
+  colorId: string;
+  qty: number;
+  free?: boolean;
+}
+
+export interface PricedCart {
+  /** Total in minor units (øre). */
+  amountOre: number;
+  /** Normalised line items for metadata. */
+  cartMeta: { slug: string; colorId: string; qty: number; bump?: boolean }[];
+}
+
+/** Optional pre-purchase order bump (one discounted extra unit). */
+export interface BumpInput {
+  colorId: string;
+}
+
+/** Normalise an optional order-bump payload from a checkout request body. */
+export function parseBump(v: unknown): BumpInput | null {
+  if (
+    v &&
+    typeof v === "object" &&
+    typeof (v as { colorId?: unknown }).colorId === "string"
+  ) {
+    return { colorId: (v as { colorId: string }).colorId };
+  }
+  return null;
+}
+
+/** Thrown on an invalid cart; carries the HTTP status the route should return. */
+export class PricingError extends Error {
+  status: number;
+  constructor(message: string, status = 400) {
+    super(message);
+    this.status = status;
+  }
+}
+
+const clampQty = (q: number) =>
+  Math.max(1, Math.min(99, Math.floor(Number(q) || 0)));
+
+/**
+ * Price a cart from the SERVER catalogue, applying the BOGO free-unit
+ * allowance (each paid unit backs one free unit; unbacked free units fall
+ * through as paid). Throws PricingError on an empty or invalid cart.
+ */
+export function priceCart(
+  items: PriceReqItem[],
+  bump?: BumpInput | null,
+): PricedCart {
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new PricingError("Handlekurven er tom.");
+  }
+
+  let freeAllowance = items
+    .filter((it) => !it.free)
+    .reduce((sum, it) => sum + clampQty(it.qty), 0);
+
+  let amountOre = 0;
+  const cartMeta: PricedCart["cartMeta"] = [];
+
+  for (const it of items) {
+    const product = getProduct(it.slug);
+    const color = product?.colors.find((c) => c.id === it.colorId);
+    const qty = clampQty(it.qty);
+    if (!product || !color) {
+      throw new PricingError("Et produkt i handlekurven finnes ikke.");
+    }
+
+    if (it.free) {
+      const granted = Math.min(qty, freeAllowance);
+      freeAllowance -= granted;
+      const remainder = qty - granted;
+      if (remainder > 0) amountOre += product.priceNok * 100 * remainder;
+    } else {
+      amountOre += product.priceNok * 100 * qty;
+    }
+    cartMeta.push({ slug: product.slug, colorId: color.id, qty: it.qty });
+  }
+
+  // Order bump: append one discounted extra unit to the same payment. A bad
+  // colour is ignored (never fail the whole checkout over the add-on).
+  if (bump) {
+    const product = getProduct(ORDER_BUMP.slug);
+    const color = product?.colors.find((c) => c.id === bump.colorId);
+    if (product && color) {
+      amountOre += bumpUnitPriceNok() * 100;
+      cartMeta.push({ slug: product.slug, colorId: color.id, qty: 1, bump: true });
+    }
+  }
+
+  if (amountOre <= 0) throw new PricingError("Ugyldig handlekurv.");
+  return { amountOre, cartMeta };
+}
+
+/**
+ * Extract the Meta CAPI context (consent flag + _fbp/_fbc cookies) from a
+ * checkout request body into a flat string map for payment metadata.
+ */
+export function readCapiMeta(body: unknown): Record<string, string> {
+  const b = (body ?? {}) as Record<string, unknown>;
+  const str = (v: unknown) =>
+    typeof v === "string" ? v.slice(0, 200) : undefined;
+  const meta: Record<string, string> = {};
+  if (b.mc === "1") meta.mc = "1";
+  const fbp = str(b.fbp);
+  const fbc = str(b.fbc);
+  if (fbp) meta.fbp = fbp;
+  if (fbc) meta.fbc = fbc;
+  return meta;
+}
