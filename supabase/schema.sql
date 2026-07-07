@@ -1,6 +1,11 @@
--- Webshop schema. Run ALL of this once in the Supabase SQL editor.
--- Orders are written server-side by the Stripe webhook using the service-role
--- key, so Row Level Security can stay restrictive (no public access needed).
+-- ============================================================================
+-- THE database file. This is ALL the SQL the store needs — nothing else to
+-- hunt down. Copy-paste the WHOLE file into the Supabase SQL editor and run.
+-- Idempotent (if-not-exists everywhere), so it's always safe to re-run —
+-- after pulling new code, run it again and any new tables/columns appear.
+-- ============================================================================
+-- Everything is written server-side with the service-role key, so Row Level
+-- Security stays restrictive: RLS on, no policies, no public access.
 
 create table if not exists public.orders (
   id                 uuid primary key default gen_random_uuid(),
