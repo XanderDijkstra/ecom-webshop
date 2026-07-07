@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { FB_PIXEL_ID } from "@/lib/fpixel";
+import { getTrackingId } from "@/lib/settings";
 
 // Meta Conversions API (server-side events). Sends a server copy of browser
 // pixel events straight to Meta, deduplicated with the browser pixel via a
@@ -44,7 +44,10 @@ interface CapiEvent {
 /** Send any standard e-commerce event to the Conversions API. */
 export async function sendCapiEvent(e: CapiEvent): Promise<void> {
   const token = process.env.META_CAPI_ACCESS_TOKEN;
-  if (!token || !FB_PIXEL_ID) return; // not configured yet — no-op
+  if (!token) return; // not configured yet — no-op
+  // Pixel ID comes from the admin Settings tab (env var overrides).
+  const pixelId = await getTrackingId("meta_pixel_id");
+  if (!pixelId) return;
 
   const user_data: Record<string, unknown> = {};
   if (e.user.email) user_data.em = [hash(e.user.email)];
@@ -84,7 +87,7 @@ export async function sendCapiEvent(e: CapiEvent): Promise<void> {
 
   try {
     const res = await fetch(
-      `https://graph.facebook.com/${GRAPH_VERSION}/${FB_PIXEL_ID}/events?access_token=${encodeURIComponent(token)}`,
+      `https://graph.facebook.com/${GRAPH_VERSION}/${pixelId}/events?access_token=${encodeURIComponent(token)}`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },

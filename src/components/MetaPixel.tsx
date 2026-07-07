@@ -3,29 +3,27 @@
 import Script from "next/script";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
-import { FB_PIXEL_ID } from "@/lib/fpixel";
 import { track } from "@/lib/track";
 
 /**
  * Loads the Meta Pixel base code for ALL visitors (the consent gate was
- * deliberately removed). Fires a PageView on first mount AND on every
- * client-side route change, routed through track() so the browser pixel and
- * the Conversions API share one event_id per view (dedup). The inline snippet
- * only initialises the pixel (no inline PageView), so nothing double-counts.
+ * deliberately removed). The pixel ID comes from <TrackingScripts> — pasted in
+ * the admin Settings tab (or the NEXT_PUBLIC_META_PIXEL_ID env override).
+ * Fires a PageView on first mount AND on every client-side route change,
+ * routed through track() so the browser pixel and the Conversions API share
+ * one event_id per view (dedup). The inline snippet only initialises the pixel
+ * (no inline PageView), so nothing double-counts.
  */
-export function MetaPixel() {
+export function MetaPixel({ pixelId }: { pixelId: string }) {
   const pathname = usePathname();
   const trackedPath = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!FB_PIXEL_ID) return;
     if (trackedPath.current !== pathname) {
       trackedPath.current = pathname;
       track("PageView");
     }
   }, [pathname]);
-
-  if (!FB_PIXEL_ID) return null;
 
   return (
     <>
@@ -38,7 +36,7 @@ n.queue=[];t=b.createElement(e);t.async=!0;
 t.src=v;s=b.getElementsByTagName(e)[0];
 s.parentNode.insertBefore(t,s)}(window, document,'script',
 'https://connect.facebook.net/en_US/fbevents.js');
-fbq('init', '${FB_PIXEL_ID}');`}
+fbq('init', '${pixelId}');`}
       </Script>
       <noscript>
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -47,7 +45,7 @@ fbq('init', '${FB_PIXEL_ID}');`}
           width="1"
           style={{ display: "none" }}
           alt=""
-          src={`https://www.facebook.com/tr?id=${FB_PIXEL_ID}&ev=PageView&noscript=1`}
+          src={`https://www.facebook.com/tr?id=${pixelId}&ev=PageView&noscript=1`}
         />
       </noscript>
     </>

@@ -71,13 +71,20 @@ verified domain) + `ORDER_NOTIFY_TO`. Until the domain is verified, Resend is
 in test mode and only mails your own address. Send-only domains can't
 *receive* — create a real mailbox (or forwarding) for the support address.
 
-## 8. Tracking (optional, per store)
+## 8. Tracking — paste it in the backend
 
-- **Meta**: `NEXT_PUBLIC_META_PIXEL_ID` + `META_CAPI_ACCESS_TOKEN`. Browser
-  pixel + server CAPI share event IDs, so Events Manager shows deduplicated
-  Browser+Server pairs. Purchase fires server-side from the webhooks.
-- **Clarity**: `NEXT_PUBLIC_CLARITY_ID`.
-- Both no-op while unset. `NEXT_PUBLIC_*` vars need a redeploy to take effect.
+Log in to `/admin` → **Settings → Tracking** and paste the IDs. No code, no
+redeploy — live within ~5 minutes (edge cache):
+
+- **Meta Pixel ID** — also set `META_CAPI_ACCESS_TOKEN` in Vercel for
+  server-side events (that one is a secret, so it stays an env var). Browser
+  pixel + CAPI share event IDs → deduplicated Browser+Server pairs in Events
+  Manager; Purchase fires server-side from the webhooks.
+- **Google tag** — GA4 `G-…`, Ads `AW-…` or `GT-…`.
+- **Microsoft Clarity** project ID.
+
+All three no-op while empty. The `NEXT_PUBLIC_*` env vars still work as hard
+overrides (the admin field locks when one is set).
 
 ## 9. Payments beyond cards (optional)
 
@@ -101,6 +108,10 @@ If the supplier only fulfils through Shopify (e.g. TeamDrop):
    before the supplier ships it.
 
 ## Launch checklist
+
+**This whole checklist lives in the backend**: `/admin` → **To-do** → "Load
+setup checklist" seeds it into the store's own database, so you can check
+items off as you go and add store-specific tasks.
 
 - [ ] Test purchase with Stripe test keys end-to-end: order in admin, both
       customer + owner emails, Telegram ping, (Shopify order if configured)

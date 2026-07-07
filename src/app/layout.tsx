@@ -3,8 +3,7 @@ import { Instrument_Serif, Schibsted_Grotesk } from "next/font/google";
 import "./globals.css";
 import { CartProvider } from "@/components/cart/CartProvider";
 import { FunnelTracker } from "@/components/FunnelTracker";
-import { MetaPixel } from "@/components/MetaPixel";
-import { Clarity } from "@/components/Clarity";
+import { TrackingScripts } from "@/components/TrackingScripts";
 import { SITE } from "@/lib/site";
 
 const grotesk = Schibsted_Grotesk({
@@ -59,11 +58,11 @@ export default function RootLayout({
   return (
     <html lang="nb" className={`${grotesk.variable} ${instrument.variable}`}>
       <body>
-        {/* Tracking runs for all visitors — the cookie banner/consent gate was
-            deliberately removed (small-shop decision, 2026-07-06). */}
+        {/* Tracking runs for all visitors (no consent gate — small-shop
+            decision). IDs come from the admin Settings tab via
+            /api/site-config; env vars override. */}
         <FunnelTracker />
-        <MetaPixel />
-        <Clarity />
+        <TrackingScripts />
         <CartProvider>{children}</CartProvider>
       </body>
     </html>

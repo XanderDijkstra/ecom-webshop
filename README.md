@@ -26,7 +26,10 @@ incrementally.
   Purchase, optional Shopify order for dropship fulfilment.
 - **Admin** (`/admin`, Supabase Auth) — dashboard with a unique-visitor
   conversion funnel, orders (fulfilment status, tracking, delete), customers
-  & leads, marketing email log with previews, insights, settings.
+  & leads, marketing email log with previews, insights, a **store to-do list**
+  (seeds the setup checklist) and **settings where tracking IDs (Meta Pixel,
+  Google tag, Clarity) are pasted in** — stored in the DB, live without a
+  redeploy.
 - **Automation** — abandoned-checkout reminder (GitHub Actions, every 15 min)
   and a Friday Telegram store report. No Vercel crons (Hobby-plan trap —
   see SETUP §5).

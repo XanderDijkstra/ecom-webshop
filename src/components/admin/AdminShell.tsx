@@ -11,7 +11,9 @@ import { Products } from "./views/Products";
 import { Customers } from "./views/Customers";
 import { Marketing } from "./views/Marketing";
 import { Insights } from "./views/Insights";
+import { Todos } from "./views/Todos";
 import { Settings } from "./views/Settings";
+import { COMPANY } from "@/lib/company";
 
 type View =
   | "dashboard"
@@ -20,6 +22,7 @@ type View =
   | "customers"
   | "marketing"
   | "insights"
+  | "todo"
   | "settings";
 
 const NAV: { key: View; label: string; icon: React.ReactNode }[] = [
@@ -29,6 +32,7 @@ const NAV: { key: View; label: string; icon: React.ReactNode }[] = [
   { key: "customers", label: "Customers", icon: <IconUsers /> },
   { key: "marketing", label: "Marketing", icon: <IconMail /> },
   { key: "insights", label: "Insights", icon: <IconChart /> },
+  { key: "todo", label: "To-do", icon: <IconCheck /> },
   { key: "settings", label: "Settings", icon: <IconGear /> },
 ];
 
@@ -39,11 +43,12 @@ const TITLES: Record<View, string> = {
   customers: "Customer base",
   marketing: "Marketing — sent emails",
   insights: "Insights",
+  todo: "Store to-do list",
   settings: "Settings",
 };
 
 /** Tabs that manage their own data (no global date range / refresh). */
-const SELF_CONTAINED: View[] = ["customers", "marketing", "settings"];
+const SELF_CONTAINED: View[] = ["customers", "marketing", "todo", "settings"];
 
 export function AdminShell({
   session,
@@ -138,7 +143,9 @@ export function AdminShell({
       {/* Sidebar (desktop) */}
       <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-[#e8e8e4] bg-white lg:flex">
         <div className="flex items-center gap-2 px-6 py-5">
-          <span className="font-serif text-[22px] tracking-[0.04em]">BÆRA</span>
+          <span className="font-serif text-[22px] tracking-[0.04em]">
+            {COMPANY.brand}
+          </span>
           <span className="rounded bg-ink px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cream">
             Admin
           </span>
@@ -169,7 +176,7 @@ export function AdminShell({
         {/* Mobile top bar + nav */}
         <div className="border-b border-[#e8e8e4] bg-white lg:hidden">
           <div className="flex items-center justify-between px-5 py-4">
-            <span className="font-serif text-[20px]">BÆRA Admin</span>
+            <span className="font-serif text-[20px]">{COMPANY.brand} Admin</span>
             <button onClick={onSignOut} className="text-[13px] font-medium text-clay">
               Sign out
             </button>
@@ -248,8 +255,14 @@ export function AdminShell({
               funnel={funnel}
               funnelLoading={funnelLoading}
             />
+          ) : view === "todo" ? (
+            <Todos token={session.access_token} />
           ) : (
-            <Settings email={email} onSignOut={onSignOut} />
+            <Settings
+              email={email}
+              token={session.access_token}
+              onSignOut={onSignOut}
+            />
           )}
         </main>
       </div>
@@ -339,6 +352,14 @@ function IconMail() {
     <svg className={I} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <rect x="3" y="5" width="18" height="14" rx="2" />
       <path d="m3 7 9 6 9-6" />
+    </svg>
+  );
+}
+function IconCheck() {
+  return (
+    <svg className={I} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="3" y="3" width="18" height="18" rx="4" />
+      <path d="m8 12 3 3 5-6" />
     </svg>
   );
 }

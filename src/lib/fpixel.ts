@@ -1,10 +1,7 @@
-// Meta (Facebook) Pixel helpers. The base loader lives in <MetaPixel>; these
-// helpers fire standard e-commerce events from anywhere on the client and
-// no-op safely on the server or before fbq has loaded.
-
-// Per-store: set NEXT_PUBLIC_META_PIXEL_ID in the env (inlined at build time,
-// so redeploy after changing it). All pixel + CAPI code no-ops while unset.
-export const FB_PIXEL_ID = process.env.NEXT_PUBLIC_META_PIXEL_ID ?? "";
+// Meta (Facebook) Pixel helpers. The base loader lives in <MetaPixel> (pixel
+// ID from the admin Settings tab via <TrackingScripts>); these helpers fire
+// standard e-commerce events from anywhere on the client and no-op safely on
+// the server or before fbq has loaded.
 
 declare global {
   interface Window {

@@ -1,4 +1,4 @@
--- BÆRA webshop — orders table. Run once in the Supabase SQL editor.
+-- Webshop schema. Run ALL of this once in the Supabase SQL editor.
 -- Orders are written server-side by the Stripe webhook using the service-role
 -- key, so Row Level Security can stay restrictive (no public access needed).
 
@@ -13,8 +13,19 @@ create table if not exists public.orders (
   payment_status     text,
   shipping_address   jsonb,
   items              jsonb,
-  created_at         timestamptz not null default now()
+  fulfillment_status text default 'new',   -- new | processing | shipped | delivered | cancelled
+  tracking_number    text,
+  admin_note         text,
+  created_at         timestamptz not null default now(),
+  updated_at         timestamptz not null default now()
 );
+
+-- Safe re-run / upgrade path for databases created from an older schema —
+-- recordOrder() fails silently if these columns are missing.
+alter table public.orders add column if not exists fulfillment_status text default 'new';
+alter table public.orders add column if not exists tracking_number text;
+alter table public.orders add column if not exists admin_note text;
+alter table public.orders add column if not exists updated_at timestamptz not null default now();
 
 create index if not exists orders_created_at_idx on public.orders (created_at desc);
 
@@ -101,3 +112,35 @@ create index if not exists email_log_created_idx
 
 -- Same lockdown as orders: service-role only, no public policies.
 alter table public.email_log enable row level security;
+
+
+-- Store settings — key/value pairs editable from the admin Settings tab
+-- (tracking IDs like the Meta pixel, Google tag and Clarity project). Read
+-- server-side; env vars with the same meaning always take precedence.
+
+create table if not exists public.store_settings (
+  key         text primary key,
+  value       text,
+  updated_at  timestamptz not null default now()
+);
+
+-- Same lockdown as orders: service-role only, no public policies.
+alter table public.store_settings enable row level security;
+
+
+-- Store to-dos — the setup/launch checklist managed from the admin "To-do"
+-- tab. Seeded with the standard new-store checklist on first use.
+
+create table if not exists public.store_todos (
+  id          uuid primary key default gen_random_uuid(),
+  label       text not null,
+  done        boolean not null default false,
+  sort        integer not null default 0,
+  created_at  timestamptz not null default now(),
+  done_at     timestamptz
+);
+
+create index if not exists store_todos_sort_idx on public.store_todos (sort, created_at);
+
+-- Same lockdown as orders: service-role only, no public policies.
+alter table public.store_todos enable row level security;
