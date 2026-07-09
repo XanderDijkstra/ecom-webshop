@@ -23,6 +23,11 @@ Use this template on GitHub ("Use this template" → new repo), clone it, and
 | `public/images/` | Replace all product + explainer images. |
 | Storefront copy | Homepage, product page, FAQ, emails — per-store work; the template ships the Norwegian single-product example. |
 
+**Write the storefront per [methodology/LANDING-PAGE.md](methodology/LANDING-PAGE.md)** —
+image-carousel cadence, headline formula (outcome + timeframe + mechanism,
+≥4/7 checklist), benefit bullets, offer tiers, section order, FAQ sourcing.
+Don't freestyle the page structure.
+
 Grep for the old brand before launch: `grep -ri "yourbrand" src/` should be
 the only thing left.
 

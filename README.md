@@ -15,6 +15,11 @@ incrementally.
 ~1–2 h). The build history and pitfalls behind it live in
 [docs/PLAYBOOK.md](docs/PLAYBOOK.md).
 
+**→ Structure the landing page per
+[docs/methodology/LANDING-PAGE.md](docs/methodology/LANDING-PAGE.md)** —
+the conversion blueprint every new store's copy, image cadence, offer and
+section order must follow.
+
 ## What's included
 
 - **Storefront** — PDP with image gallery + variant switcher, cart drawer,
