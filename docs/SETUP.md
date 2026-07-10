@@ -51,6 +51,10 @@ env.
 
 Import the repo, paste every var from `.env.example`, deploy.
 
+- **Team: always "Xander Dijkstra's projects"** (`xander-dijkstras-projects`),
+  never Darkwing. When using the CLI, pass
+  `--scope xander-dijkstras-projects` and verify the project landed there.
+
 - **Never add sub-daily crons to `vercel.json` on Hobby** — it silently blocks
   ALL deploys (no deployment records at all). Scheduling lives in GitHub
   Actions instead (already included).
