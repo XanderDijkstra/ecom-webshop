@@ -38,9 +38,6 @@ export async function POST(req: Request) {
       paymentStatus: s.payment_status ?? null,
       address: s.customer_details?.address ?? null,
       cart: s.metadata?.cart,
-      mc: s.metadata?.mc,
-      fbp: s.metadata?.fbp ?? null,
-      fbc: s.metadata?.fbc ?? null,
       method: "card",
     });
   } else if (event.type === "payment_intent.succeeded") {
@@ -55,9 +52,6 @@ export async function POST(req: Request) {
       paymentStatus: pi.status === "succeeded" ? "paid" : pi.status,
       address: pi.shipping?.address ?? null,
       cart: pi.metadata?.cart,
-      mc: pi.metadata?.mc,
-      fbp: pi.metadata?.fbp ?? null,
-      fbc: pi.metadata?.fbc ?? null,
       method: "card",
     });
   }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getStripe } from "@/lib/stripe";
 import { priceCart, parseBump, PricingError } from "@/lib/pricing";
+import { findValidCoupon, discountOre } from "@/lib/coupons";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,11 +41,24 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: err.message }, { status: err.status ?? 400 });
   }
 
+  // Optional coupon — same server-side rules as at create time.
+  let amountOre = priced.amountOre;
+  let couponCode: string | undefined;
+  const coupon = await findValidCoupon(body?.coupon);
+  if (coupon) {
+    amountOre = discountOre(amountOre, coupon.percent_off);
+    couponCode = coupon.code;
+    if (amountOre === 0) return NextResponse.json({ free: true });
+    if (amountOre < 300) amountOre = 300; // Stripe's ~3 NOK minimum charge
+  }
+
   try {
-    // Metadata is merged key-wise, so the CAPI context set at create survives.
     await stripe.paymentIntents.update(id, {
-      amount: priced.amountOre,
-      metadata: { cart: JSON.stringify(priced.cartMeta).slice(0, 480) },
+      amount: amountOre,
+      metadata: {
+        cart: JSON.stringify(priced.cartMeta).slice(0, 480),
+        ...(couponCode ? { coupon: couponCode } : {}),
+      },
     });
   } catch (err) {
     console.error("[payment-intent/update] failed:", err);
@@ -54,5 +68,5 @@ export async function POST(req: Request) {
     );
   }
 
-  return NextResponse.json({ amount: priced.amountOre / 100 });
+  return NextResponse.json({ amount: amountOre / 100 });
 }

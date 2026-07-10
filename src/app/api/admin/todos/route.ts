@@ -16,7 +16,6 @@ const SETUP_CHECKLIST = [
   "GitHub: gh variable set SITE_URL + gh secret set CRON_SECRET (Actions crons)",
   "Resend: verify domain, set ORDER_FROM + ORDER_NOTIFY_TO, create a real support mailbox",
   "Paste Meta Pixel / Google Tag / Clarity IDs in Settings → Tracking",
-  "Meta CAPI: set META_CAPI_ACCESS_TOKEN in Vercel + redeploy",
   "Optional: Vipps (VIPPS_* env + NEXT_PUBLIC_VIPPS_ENABLED=1)",
   "Optional: Telegram order alerts (TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID)",
   "Optional: Shopify fulfilment — token + domain in env, update SHOPIFY_VARIANT_MAP by IMAGE",

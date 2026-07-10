@@ -27,7 +27,7 @@ export interface TrackingConfig {
   clarityId: string;
 }
 
-// Tiny in-memory cache so webhook/CAPI paths don't hit the DB on every event.
+// Tiny in-memory cache so server paths don't hit the DB on every request.
 // Serverless instances are short-lived, so 60s staleness is the worst case
 // after changing a setting in the admin.
 let cache: { at: number; values: Record<string, string> } | null = null;

@@ -16,7 +16,7 @@ const TRACKING_FIELDS: {
     key: "meta_pixel_id",
     label: "Meta Pixel ID",
     placeholder: "1234567890123456",
-    hint: "Events Manager → your pixel → Settings. Enables the browser pixel AND server-side CAPI events (CAPI also needs META_CAPI_ACCESS_TOKEN in the env).",
+    hint: "Events Manager → your pixel → Settings. Loads the browser pixel (PageView, ViewContent, AddToCart, InitiateCheckout, Purchase) for every visitor.",
   },
   {
     key: "google_tag_id",

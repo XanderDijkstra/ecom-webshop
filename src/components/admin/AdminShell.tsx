@@ -254,6 +254,7 @@ export function AdminShell({
               to={to}
               funnel={funnel}
               funnelLoading={funnelLoading}
+              token={session.access_token}
             />
           ) : view === "todo" ? (
             <Todos token={session.access_token} />

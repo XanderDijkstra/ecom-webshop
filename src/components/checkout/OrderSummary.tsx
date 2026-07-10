@@ -2,10 +2,12 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useState } from "react";
 import { useCart } from "@/components/cart/CartProvider";
 import { fmtKr } from "@/lib/format";
 import { bumpUnitPriceNok } from "@/lib/offers";
 import { BumpBox } from "./BumpBox";
+import type { AppliedCoupon } from "./CheckoutPage";
 
 /** Read-only order summary shown alongside the checkout form (Shopify-style). */
 export function OrderSummary({
@@ -13,15 +15,30 @@ export function OrderSummary({
   bumpColorId,
   onBumpToggle,
   onBumpColorChange,
+  coupon,
+  couponBusy,
+  couponError,
+  onApplyCoupon,
+  onRemoveCoupon,
 }: {
   bumpOn: boolean;
   bumpColorId: string;
   onBumpToggle: (on: boolean) => void;
   onBumpColorChange: (colorId: string) => void;
+  coupon: AppliedCoupon | null;
+  couponBusy: boolean;
+  couponError: string | null;
+  onApplyCoupon: (code: string) => void;
+  onRemoveCoupon: () => void;
 }) {
   const cart = useCart();
+  const [code, setCode] = useState("");
   const bumpPrice = bumpOn ? bumpUnitPriceNok() : 0;
-  const total = cart.subtotal + bumpPrice;
+  const preDiscount = cart.subtotal + bumpPrice;
+  const discount = coupon
+    ? Math.round((preDiscount * coupon.percentOff) / 100)
+    : 0;
+  const total = Math.max(0, preDiscount - discount);
 
   return (
     <div className="rounded-2xl border border-line bg-white p-6">
@@ -88,7 +105,52 @@ export function OrderSummary({
         />
       </div>
 
-      <div className="mt-6 space-y-2.5 border-t border-line pt-5 text-[14px]">
+      {/* Coupon code */}
+      <div className="mt-6 border-t border-line pt-5">
+        {coupon ? (
+          <div className="flex items-center justify-between rounded-xl bg-[#e9f4ec] px-3.5 py-2.5 text-[13.5px]">
+            <span className="font-semibold text-[#1f7a4d]">
+              {coupon.code} · −{coupon.percentOff} %
+            </span>
+            <button
+              type="button"
+              onClick={onRemoveCoupon}
+              className="text-[12.5px] font-medium text-[#1f7a4d] underline"
+            >
+              Fjern
+            </button>
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={code}
+              placeholder="Rabattkode"
+              onChange={(e) => setCode(e.target.value.toUpperCase())}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  if (code.trim()) onApplyCoupon(code.trim());
+                }
+              }}
+              className="min-w-0 flex-1 rounded-xl border border-line px-3.5 py-2.5 text-[14px] uppercase outline-none transition-colors focus:border-ink"
+            />
+            <button
+              type="button"
+              onClick={() => code.trim() && onApplyCoupon(code.trim())}
+              disabled={couponBusy || !code.trim()}
+              className="shrink-0 rounded-xl border border-ink px-4 py-2.5 text-[13.5px] font-semibold text-ink transition-colors hover:bg-ink hover:text-cream disabled:opacity-50"
+            >
+              {couponBusy ? "…" : "Bruk"}
+            </button>
+          </div>
+        )}
+        {couponError && (
+          <p className="mt-2 text-[12.5px] text-red-700">{couponError}</p>
+        )}
+      </div>
+
+      <div className="mt-5 space-y-2.5 border-t border-line pt-5 text-[14px]">
         <div className="flex items-center justify-between text-muted">
           <span>Delsum</span>
           <span className="font-medium text-ink">{fmtKr(cart.subtotal)}</span>
@@ -97,6 +159,12 @@ export function OrderSummary({
           <div className="flex items-center justify-between text-muted">
             <span>Ekstra Bæreslyng (−30 %)</span>
             <span className="font-medium text-ink">{fmtKr(bumpPrice)}</span>
+          </div>
+        )}
+        {coupon && (
+          <div className="flex items-center justify-between text-[#1f7a4d]">
+            <span>Rabatt ({coupon.code})</span>
+            <span className="font-medium">−{fmtKr(discount)}</span>
           </div>
         )}
         <div className="flex items-center justify-between text-muted">

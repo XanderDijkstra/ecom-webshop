@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getStripe } from "@/lib/stripe";
+import { getSupabaseAdmin } from "@/lib/supabase";
 import { finalizeVippsPayment } from "@/lib/vipps";
 import { PurchaseTracker } from "@/components/store/PurchaseTracker";
 
@@ -33,7 +34,32 @@ async function getPurchase(args: {
   sessionId?: string;
   paymentIntent?: string;
   vipps?: string;
+  free?: string;
 }): Promise<Purchase | null> {
+  // 100%-coupon order (recorded by /api/free-order): read it back from the DB
+  // so the pixel Purchase fires with the (0 kr) order like any other.
+  if (args.free) {
+    try {
+      const supabase = getSupabaseAdmin();
+      if (!supabase) return null;
+      const { data } = await supabase
+        .from("orders")
+        .select("stripe_session_id,amount_total,currency,items")
+        .eq("stripe_session_id", args.free)
+        .maybeSingle();
+      if (!data) return null;
+      return {
+        orderId: data.stripe_session_id,
+        value: Number(data.amount_total) || 0,
+        currency: (data.currency ?? "NOK").toUpperCase(),
+        contentIds: slugsFrom(
+          Array.isArray(data.items) ? JSON.stringify(data.items) : undefined,
+        ),
+      };
+    } catch {
+      return null;
+    }
+  }
   // Vipps: finalise (capture + record) on return, in case the webhook hasn't
   // fired yet. Idempotent, so a duplicate with the webhook is harmless.
   if (args.vipps) {
@@ -88,13 +114,15 @@ export default async function ThankYouPage({
     session_id?: string;
     payment_intent?: string;
     vipps?: string;
+    free?: string;
   }>;
 }) {
-  const { session_id, payment_intent, vipps } = await searchParams;
+  const { session_id, payment_intent, vipps, free } = await searchParams;
   const purchase = await getPurchase({
     sessionId: session_id,
     paymentIntent: payment_intent,
     vipps,
+    free,
   });
 
   return (

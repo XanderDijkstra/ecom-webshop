@@ -1,15 +1,15 @@
 import { getSupabaseAdmin } from "./supabase";
-import { sendCapiPurchase } from "./capi";
 import { sendOrderEmails } from "./email";
 import { sendTelegramOrder } from "./telegram";
 import { createShopifyOrder } from "./shopify";
 import { markCartConverted } from "./abandoned";
-import { SITE } from "./site";
 
 // Shared order-recording pipeline. Both the Stripe webhook and the Vipps flow
 // normalise their provider payload into an OrderInput and call recordOrder().
-// It persists the order (dedup + upsert), fires the Meta CAPI Purchase, and
-// sends the admin + customer emails — exactly once per order.
+// It persists the order (dedup + upsert) and sends the admin + customer
+// emails — exactly once per order. Meta tracking is browser-pixel only (the
+// CAPI layer was removed 2026-07-09 for a simpler, single-source setup); the
+// Purchase event fires client-side on /takk via <PurchaseTracker>.
 
 /** Provider-agnostic delivery address (superset of Stripe.Address / Vipps). */
 export interface OrderAddress {
@@ -32,14 +32,11 @@ export interface OrderInput {
   paymentStatus: string | null;
   address: OrderAddress | null;
   cart: string | undefined;
-  mc: string | undefined;
-  fbp: string | null;
-  fbc: string | null;
   /** "card" | "vipps" — surfaced in the admin email only (not persisted). */
   method?: string;
 }
 
-/** Persist a paid order (when a DB is configured) and fire CAPI + emails. */
+/** Persist a paid order (when a DB is configured) and send notifications. */
 export async function recordOrder(o: OrderInput) {
   const supabase = getSupabaseAdmin();
   const order = {
@@ -74,24 +71,6 @@ export async function recordOrder(o: OrderInput) {
     }
   } else {
     console.log("[orders] paid order (no DB configured):", order);
-  }
-
-  // Meta Conversions API: server-side Purchase, deduplicated with the browser
-  // pixel via the order id as event_id. Only when marketing cookies accepted.
-  if (o.mc === "1" && order.payment_status === "paid") {
-    await sendCapiPurchase({
-      eventId: o.id,
-      value: order.amount_total ?? 0,
-      currency: order.currency,
-      contentIds: cartSlugs(order.items),
-      eventSourceUrl: `${SITE.url}/takk`,
-      user: {
-        email: order.email,
-        phone: order.phone,
-        fbp: o.fbp,
-        fbc: o.fbc,
-      },
-    });
   }
 
   // A paid order clears any pending abandoned-checkout reminder for this email
@@ -135,21 +114,6 @@ export async function recordOrder(o: OrderInput) {
       console.error("[shopify] order not synced:", JSON.stringify(sync));
     }
   }
-}
-
-/** Unique product slugs from the cart metadata, for Meta content_ids. */
-function cartSlugs(items: unknown): string[] {
-  if (!Array.isArray(items)) return ["baereslyngen"];
-  const slugs = [
-    ...new Set(
-      items
-        .map((i) =>
-          i && typeof i === "object" ? (i as { slug?: string }).slug : null,
-        )
-        .filter((s): s is string => typeof s === "string"),
-    ),
-  ];
-  return slugs.length ? slugs : ["baereslyngen"];
 }
 
 function safeParse(v: string | undefined) {

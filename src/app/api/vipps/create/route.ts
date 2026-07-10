@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
-import { priceCart, readCapiMeta, parseBump, PricingError } from "@/lib/pricing";
+import { priceCart, parseBump, PricingError } from "@/lib/pricing";
+import { findValidCoupon, discountOre } from "@/lib/coupons";
 import { createVippsPayment, vippsConfigured } from "@/lib/vipps";
 import { SITE } from "@/lib/site";
 
@@ -10,8 +11,7 @@ export const dynamic = "force-dynamic";
 /**
  * Starts a Vipps ePayment for the cart and returns the redirect URL. The cart
  * is priced on the SERVER (same as the Stripe flow); client amounts are never
- * trusted. CAPI context is stored on the payment metadata so the finaliser can
- * send a matching server-side Purchase.
+ * trusted.
  */
 export async function POST(req: Request) {
   if (!vippsConfigured()) {
@@ -37,15 +37,32 @@ export async function POST(req: Request) {
     );
   }
 
+  // Optional coupon — a free (0 kr) total can't go through Vipps; the client
+  // shows the free-order flow instead of the Vipps button in that case.
+  let amountOre = priced.amountOre;
+  let couponCode: string | undefined;
+  const coupon = await findValidCoupon(body?.coupon);
+  if (coupon) {
+    amountOre = discountOre(amountOre, coupon.percent_off);
+    couponCode = coupon.code;
+    if (amountOre === 0) {
+      return NextResponse.json(
+        { error: "Bestillingen er gratis — fullfør uten betaling." },
+        { status: 400 },
+      );
+    }
+    if (amountOre < 100) amountOre = 100; // Vipps minimum 1 NOK
+  }
+
   const reference = `baera-${randomUUID()}`;
   const metadata: Record<string, string> = {
     cart: JSON.stringify(priced.cartMeta).slice(0, 480),
-    ...readCapiMeta(body),
+    ...(couponCode ? { coupon: couponCode } : {}),
   };
 
   try {
     const { redirectUrl } = await createVippsPayment({
-      amountOre: priced.amountOre,
+      amountOre,
       reference,
       returnUrl: `${SITE.url}/takk?vipps=${encodeURIComponent(reference)}`,
       description: "Bæreslyngen",

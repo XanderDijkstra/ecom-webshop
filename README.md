@@ -27,17 +27,22 @@ section order must follow.
   review/USP sections. Ships as a working Norwegian example — replace copy,
   images and `src/lib/{company,products,offers}.ts` per store.
 - **Orders pipeline** — Stripe/Vipps webhooks → `recordOrder()` (dedup,
-  Supabase) → customer + owner email (Resend), Telegram alert, Meta CAPI
-  Purchase, optional Shopify order for dropship fulfilment.
+  Supabase) → customer + owner email (Resend), Telegram alert, Meta pixel
+  Purchase, optional Shopify order for dropship fulfilment (per-line prices
+  reconciled to the paid total, so BOGO/coupon orders show fully PAID).
 - **Admin** (`/admin`, Supabase Auth) — dashboard with a unique-visitor
   conversion funnel, orders (fulfilment status, tracking, delete), customers
-  & leads, marketing email log with previews, insights, a **store to-do list**
-  (seeds the setup checklist) and **settings where tracking IDs (Meta Pixel,
-  Google tag, Clarity) are pasted in** — stored in the DB, live without a
-  redeploy.
-- **Automation** — abandoned-checkout reminder (GitHub Actions, every 15 min)
-  and a Friday Telegram store report. No Vercel crons (Hobby-plan trap —
-  see SETUP §5).
+  & leads, a marketing tab with the **email-flow chart** (live counts per
+  stage + template previews), **coupons** (percentage codes; 100% = free
+  order via its own no-payment flow), the sent-email log, insights with a
+  **Microsoft Clarity panel** (sessions, scroll, frustration signals), a
+  **store to-do list** (seeds the setup checklist) and **settings where
+  tracking IDs (Meta Pixel, Google tag, Clarity) are pasted in** — stored in
+  the DB, live without a redeploy.
+- **Automation** — a two-step abandoned-checkout flow (reminder ~30 min after
+  abandon + a final "offer still stands" email 24 h later; GitHub Actions,
+  every 15 min) and a Friday Telegram store report. No Vercel crons
+  (Hobby-plan trap — see SETUP §5).
 - **Metrics feed** — read-only `/api/metrics` (paid revenue per day) for an
   external dashboard, bearer-token guarded.
 

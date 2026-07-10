@@ -24,9 +24,11 @@ import { bumpUnitPriceNok } from "@/lib/offers";
 export function CheckoutForm({
   paymentIntentId,
   bump,
+  coupon,
 }: {
   paymentIntentId: string | null;
   bump: { colorId: string } | null;
+  coupon: { code: string; percentOff: number } | null;
 }) {
   const stripe = useStripe();
   const elements = useElements();
@@ -35,7 +37,13 @@ export function CheckoutForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const total = cart.subtotal + (bump ? bumpUnitPriceNok() : 0);
+  const preDiscount = cart.subtotal + (bump ? bumpUnitPriceNok() : 0);
+  const total = coupon
+    ? Math.max(
+        0,
+        preDiscount - Math.round((preDiscount * coupon.percentOff) / 100),
+      )
+    : preDiscount;
 
   // Abandoned-checkout capture: once a valid email is entered, save it with the
   // cart so a reminder can go out if payment isn't completed. Debounced, and
@@ -83,8 +91,8 @@ export function CheckoutForm({
     setBusy(true);
     setError(null);
 
-    // Sync the charged amount with the bump selection before confirming.
-    if (bump && paymentIntentId) {
+    // Sync the charged amount with the bump/coupon selection before confirming.
+    if ((bump || coupon) && paymentIntentId) {
       try {
         const res = await fetch("/api/payment-intent/update", {
           method: "POST",
@@ -98,6 +106,7 @@ export function CheckoutForm({
               free: i.free,
             })),
             bump,
+            coupon: coupon?.code ?? null,
           }),
         });
         if (!res.ok) {

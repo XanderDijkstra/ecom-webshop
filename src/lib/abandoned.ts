@@ -25,6 +25,8 @@ export interface AbandonedCartRow {
   currency: string | null;
   consent: boolean;
   reminder_sent_at: string | null;
+  /** Second (final) flow email — "Tilbudet ditt står fortsatt". */
+  reminder2_sent_at: string | null;
   converted_at: string | null;
   created_at: string;
   updated_at: string;
@@ -106,6 +108,18 @@ export async function upsertAbandonedCart(input: {
     console.error("[abandoned] upsert failed:", error.message);
     return false;
   }
+
+  // New activity restarts the WHOLE flow, so also clear the step-2 stamp.
+  // Separate best-effort update: if the reminder2_sent_at column doesn't exist
+  // yet (schema.sql not re-run), the capture above must still succeed.
+  await supabase
+    .from("abandoned_carts")
+    .update({ reminder2_sent_at: null })
+    .eq("email", email)
+    .then(({ error: e2 }) => {
+      if (e2) console.error("[abandoned] reminder2 reset skipped:", e2.message);
+    });
+
   return true;
 }
 
@@ -142,6 +156,45 @@ export async function dueAbandonedCarts(
     return [];
   }
   return (data ?? []) as AbandonedCartRow[];
+}
+
+/**
+ * Carts due the SECOND (final) flow email: first reminder sent ≥`hours` ago,
+ * still unconverted, step 2 not yet sent. Consent is checked by the caller.
+ * Returns [] (with a log line) until the reminder2_sent_at column exists.
+ */
+export async function dueSecondReminders(
+  hours = 24,
+  limit = 100,
+): Promise<AbandonedCartRow[]> {
+  const supabase = getSupabaseAdmin();
+  if (!supabase) return [];
+  const cutoff = new Date(Date.now() - hours * 3_600_000).toISOString();
+  const { data, error } = await supabase
+    .from("abandoned_carts")
+    .select("*")
+    .is("reminder2_sent_at", null)
+    .is("converted_at", null)
+    .not("reminder_sent_at", "is", null)
+    .lte("reminder_sent_at", cutoff)
+    .order("reminder_sent_at", { ascending: true })
+    .limit(limit);
+  if (error) {
+    console.error("[abandoned] due2 query failed:", error.message);
+    return [];
+  }
+  return (data ?? []) as AbandonedCartRow[];
+}
+
+/** Stamp a cart's second (final) email as sent. */
+export async function markReminder2Sent(id: string): Promise<void> {
+  const supabase = getSupabaseAdmin();
+  if (!supabase) return;
+  const { error } = await supabase
+    .from("abandoned_carts")
+    .update({ reminder2_sent_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) console.error("[abandoned] markReminder2Sent failed:", error.message);
 }
 
 /** Stamp a cart as reminded so it's never nudged twice. */

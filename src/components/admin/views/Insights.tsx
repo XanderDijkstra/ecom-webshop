@@ -10,6 +10,7 @@ import {
 } from "@/lib/admin-stats";
 import { Card, Kpi, BarChart, Empty } from "../ui";
 import { Funnel, type FunnelCounts } from "../Funnel";
+import { ClarityInsights } from "../ClarityInsights";
 
 export function Insights({
   orders,
@@ -17,12 +18,14 @@ export function Insights({
   to,
   funnel,
   funnelLoading,
+  token,
 }: {
   orders: AdminOrder[];
   from: Date;
   to: Date;
   funnel: { ready: boolean; counts: FunnelCounts } | null;
   funnelLoading: boolean;
+  token: string;
 }) {
   const k = computeKpis(orders);
   const series = revenueSeries(orders, from, to);
@@ -50,6 +53,8 @@ export function Insights({
         ready={funnel?.ready ?? true}
         loading={funnelLoading}
       />
+
+      <ClarityInsights token={token} />
 
       <Card className="p-5">
         <div className="mb-4 flex items-baseline justify-between">

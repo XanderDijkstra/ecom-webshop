@@ -34,7 +34,8 @@ export function PurchaseTracker({
         value,
         currency,
       },
-      // Same id as the server-side CAPI Purchase so Meta deduplicates them.
+      // Stable per-order event id so Meta dedupes any double-fire (this is
+      // the ONLY Purchase source — the server-side CAPI copy was removed).
       { eventID: orderId },
     );
   }, [orderId, value, currency, contentIds]);

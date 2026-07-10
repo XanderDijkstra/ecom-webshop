@@ -27,8 +27,6 @@ export function useCheckout() {
     });
     logFunnel("InitiateCheckout", { value: cart.subtotal, currency: "NOK" });
     try {
-      // Forward the Meta pixel cookies so the server (Stripe webhook) can send
-      // a matching Conversions API Purchase event. Tracking runs for everyone.
       const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -39,9 +37,6 @@ export function useCheckout() {
             qty: i.qty,
             free: i.free,
           })),
-          mc: "1",
-          fbp: readCookie("_fbp"),
-          fbc: readCookie("_fbc"),
         }),
       });
       const data = await res.json();
@@ -58,10 +53,4 @@ export function useCheckout() {
   }
 
   return { checkout, loading, error };
-}
-
-/** Read a browser cookie by name (client-side only). */
-function readCookie(name: string): string | null {
-  const m = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
-  return m ? decodeURIComponent(m[1]) : null;
 }

@@ -1,19 +1,40 @@
 import { NextResponse } from "next/server";
 import { authenticateAdmin, getSupabaseAdmin } from "@/lib/supabase";
+import { buildAbandonedCartEmail } from "@/lib/email";
+import { saleState } from "@/lib/sale";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
  * Outbound-email log for the admin Marketing tab.
- * GET            → latest entries (without HTML, to keep the payload light)
- * GET ?id=<uuid> → one entry including the rendered HTML, for preview.
+ * GET                       → latest entries (without HTML, payload stays light)
+ * GET ?id=<uuid>            → one entry including the rendered HTML, for preview.
+ * GET ?template=<step-key>  → the CURRENT template rendered with a sample cart,
+ *                             so the flow view can preview content before it's
+ *                             ever sent (cart_reminder | cart_reminder_2).
  * Returns { ready:false } when the email_log table hasn't been created yet.
  */
 export async function GET(req: Request) {
   const auth = await authenticateAdmin(req);
   if (!auth.ok)
     return NextResponse.json({ error: auth.error }, { status: auth.status });
+
+  const template = new URL(req.url).searchParams.get("template");
+  if (template === "cart_reminder" || template === "cart_reminder_2") {
+    const { subject, html } = buildAbandonedCartEmail({
+      email: "kunde@example.com",
+      items: [
+        { slug: "baereslyngen", colorId: "sort", qty: 1 },
+        { slug: "baereslyngen", colorId: "aztec", qty: 1, free: true },
+      ],
+      subtotal: 590,
+      currency: "NOK",
+      saleEndsAt: saleState().endsAt,
+      step: template === "cart_reminder_2" ? 2 : 1,
+    });
+    return NextResponse.json({ email: { subject, html } });
+  }
 
   const supabase = getSupabaseAdmin();
   if (!supabase)

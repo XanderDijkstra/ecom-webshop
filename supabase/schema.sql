@@ -54,10 +54,14 @@ create table if not exists public.abandoned_carts (
   currency          text default 'NOK',
   consent           boolean not null default false,
   reminder_sent_at  timestamptz,
+  reminder2_sent_at timestamptz,   -- second (final) flow email
   converted_at      timestamptz,
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now()
 );
+
+-- Upgrade path: the two-step email flow added the final-reminder stamp.
+alter table public.abandoned_carts add column if not exists reminder2_sent_at timestamptz;
 
 -- Speeds up the cron's "due" query (oldest eligible carts first).
 create index if not exists abandoned_carts_due_idx
@@ -122,6 +126,23 @@ alter table public.email_log enable row level security;
 -- Store settings — key/value pairs editable from the admin Settings tab
 -- (tracking IDs like the Meta pixel, Google tag and Clarity project). Read
 -- server-side; env vars with the same meaning always take precedence.
+
+-- Discount coupons — created/managed from the admin (Marketing tab). Applied
+-- at checkout by code; a 100% coupon routes through the free-order flow
+-- (Stripe/Vipps can't charge 0).
+
+create table if not exists public.coupons (
+  id          uuid primary key default gen_random_uuid(),
+  code        text unique not null,          -- stored uppercase
+  percent_off integer not null check (percent_off between 1 and 100),
+  active      boolean not null default true,
+  expires_at  timestamptz,
+  created_at  timestamptz not null default now()
+);
+
+-- Same lockdown as orders: service-role only, no public policies.
+alter table public.coupons enable row level security;
+
 
 create table if not exists public.store_settings (
   key         text primary key,

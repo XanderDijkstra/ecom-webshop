@@ -161,7 +161,11 @@ export interface SendResult {
 }
 
 /** Email categories recorded in the admin's Marketing log. */
-export type EmailType = "order_confirmation" | "order_admin" | "cart_reminder";
+export type EmailType =
+  | "order_confirmation"
+  | "order_admin"
+  | "cart_reminder"
+  | "cart_reminder_2";
 
 /** Record every outbound email in email_log for the admin Marketing tab.
  *  Best-effort: a missing table or DB hiccup must never block sending. */
@@ -312,23 +316,25 @@ export interface AbandonedEmailData {
   currency: string;
   /** Sale deadline (adds truthful urgency) or null when the sale is open-ended. */
   saleEndsAt: Date | null;
+  /** Flow step: 1 = first nudge (default), 2 = final "offer still stands". */
+  step?: 1 | 2;
 }
 
 /**
- * The abandoned-checkout reminder: a single nudge to a shopper who entered their
- * email at /kasse but didn't pay. Best-effort; returns whether it was sent so
- * the cron only stamps reminder_sent_at on success. Always carries an
- * unsubscribe link (markedsføringsloven), and only the cron decides who is
- * eligible (consent + live sale).
+ * Render an abandoned-cart flow email without sending it — shared by the
+ * sender below and the admin Marketing tab's template previews.
+ * Step 1: "Handlekurven venter på deg" — the first nudge, ~30 min after abandon.
+ * Step 2: "Tilbudet ditt står fortsatt" — the FINAL email, ~24 h after step 1;
+ *         explicitly says it's the last reminder.
  */
-export async function sendAbandonedCartEmail(
-  o: AbandonedEmailData,
-): Promise<SendResult> {
-  const key = process.env.RESEND_API_KEY?.trim();
-  if (!key) return { ok: false, error: "RESEND_API_KEY not set" };
-  if (!o.email) return { ok: false, error: "no recipient" };
-
-  const from = process.env.ORDER_FROM?.trim() || `BÆRA <onboarding@resend.dev>`;
+export function buildAbandonedCartEmail(o: AbandonedEmailData): {
+  subject: string;
+  title: string;
+  html: string;
+  text: string;
+  unsubUrl: string;
+} {
+  const step = o.step === 2 ? 2 : 1;
   const items = itemLines(o.items);
   const total = money(o.subtotal ?? 0, o.currency);
   const checkoutUrl = `${COMPANY.url}/kasse`;
@@ -350,10 +356,72 @@ export async function sendAbandonedCartEmail(
       : urgencyText
   }</p>`;
 
+  const subject =
+    step === 2
+      ? "Tilbudet ditt står fortsatt hos BÆRA 🧡"
+      : "Du glemte noe hos BÆRA 🧡";
+  const title =
+    step === 2 ? "Tilbudet ditt står fortsatt" : "Handlekurven venter på deg";
+  const intro =
+    step === 2
+      ? "Hei! Vi holder fortsatt av handlekurven din, og prisene og fri frakt gjelder fortsatt. Dette er den siste påminnelsen fra oss — etterpå lar vi deg være i fred."
+      : "Hei! Vi tok vare på handlekurven din. Den ligger klar – fullfør bestillingen når det passer deg.";
+  const footer =
+    step === 2
+      ? "Dette er den siste e-posten fra oss om denne handlekurven."
+      : "";
+
+  const text = textShell(
+    title,
+    `${intro.replace(/<[^>]+>/g, "")}\n\nI handlekurven din:\n${itemLinesText(
+      o.items,
+    )}\n\nFrakt: Gratis\nSum: ${total}\n\n${urgencyText}\n\nFullfør bestillingen: ${checkoutUrl}\n${
+      footer ? `\n${footer}\n` : ""
+    }\nDu får denne e-posten fordi du la igjen e-postadressen din i kassen hos BÆRA. Meld deg av: ${unsubUrl}`,
+  );
+
+  const html = shell(
+    title,
+    `<p style="font-size:14px;line-height:1.6">${intro}</p>
+    <p style="font-size:13px;color:#8a8a84;margin:16px 0 4px">I handlekurven din</p>
+    <table style="font-size:14px;width:100%"><tbody>${items}</tbody></table>
+    <table style="font-size:14px;width:100%;margin-top:8px"><tbody>
+      <tr><td style="color:#8a8a84;padding:3px 0">Frakt</td><td style="text-align:right">Gratis</td></tr>
+      <tr><td style="padding:3px 0;font-weight:600">Sum</td><td style="text-align:right;font-weight:600">${total}</td></tr>
+    </tbody></table>
+    ${urgency}
+    <p style="margin:22px 0 0"><a href="${checkoutUrl}" style="display:inline-block;background:#1c1c1a;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-size:15px;font-weight:600">Fullfør bestillingen</a></p>
+    ${
+      footer
+        ? `<p style="font-size:12px;color:#8a8a84;margin-top:20px">${footer}</p>`
+        : ""
+    }
+    <p style="font-size:11px;color:#8a8a84;margin-top:${footer ? "8" : "24"}px">Du får denne e-posten fordi du la igjen e-postadressen din i kassen hos BÆRA. Vil du ikke ha flere påminnelser? <a href="${unsubUrl}" style="color:#8a8a84">Meld deg av her</a>.</p>`,
+  );
+
+  return { subject, title, html, text, unsubUrl };
+}
+
+/**
+ * Send an abandoned-cart flow email (step 1 or 2). Best-effort; returns whether
+ * it was sent so the cron only stamps the sent-timestamp on success. Always
+ * carries an unsubscribe link (markedsføringsloven), and only the cron decides
+ * who is eligible (consent + live sale).
+ */
+export async function sendAbandonedCartEmail(
+  o: AbandonedEmailData,
+): Promise<SendResult> {
+  const key = process.env.RESEND_API_KEY?.trim();
+  if (!key) return { ok: false, error: "RESEND_API_KEY not set" };
+  if (!o.email) return { ok: false, error: "no recipient" };
+
+  const from = process.env.ORDER_FROM?.trim() || `BÆRA <onboarding@resend.dev>`;
+  const { subject, html, text, unsubUrl } = buildAbandonedCartEmail(o);
+
   return send(key, {
     from,
     to: o.email,
-    subject: "Du glemte noe hos BÆRA 🧡",
+    subject,
     // Replies go to the monitored inbox; and one-click unsubscribe (RFC 8058)
     // so Gmail/Apple show a native "Unsubscribe" and trust the mail more.
     replyTo: COMPANY.email,
@@ -361,24 +429,7 @@ export async function sendAbandonedCartEmail(
       "List-Unsubscribe": `<${unsubUrl}>`,
       "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
     },
-    text: textShell(
-      "Handlekurven venter på deg",
-      `Hei! Vi tok vare på handlekurven din. Den ligger klar – fullfør bestillingen når det passer deg.\n\nI handlekurven din:\n${itemLinesText(
-        o.items,
-      )}\n\nFrakt: Gratis\nSum: ${total}\n\n${urgencyText}\n\nFullfør bestillingen: ${checkoutUrl}\n\nDu får denne e-posten fordi du la igjen e-postadressen din i kassen hos BÆRA. Meld deg av: ${unsubUrl}`,
-    ),
-    html: shell(
-      "Handlekurven venter på deg",
-      `<p style="font-size:14px;line-height:1.6">Hei! Vi tok vare på handlekurven din. Den ligger klar – fullfør bestillingen når det passer deg.</p>
-      <p style="font-size:13px;color:#8a8a84;margin:16px 0 4px">I handlekurven din</p>
-      <table style="font-size:14px;width:100%"><tbody>${items}</tbody></table>
-      <table style="font-size:14px;width:100%;margin-top:8px"><tbody>
-        <tr><td style="color:#8a8a84;padding:3px 0">Frakt</td><td style="text-align:right">Gratis</td></tr>
-        <tr><td style="padding:3px 0;font-weight:600">Sum</td><td style="text-align:right;font-weight:600">${total}</td></tr>
-      </tbody></table>
-      ${urgency}
-      <p style="margin:22px 0 0"><a href="${checkoutUrl}" style="display:inline-block;background:#1c1c1a;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-size:15px;font-weight:600">Fullfør bestillingen</a></p>
-      <p style="font-size:11px;color:#8a8a84;margin-top:24px">Du får denne e-posten fordi du la igjen e-postadressen din i kassen hos BÆRA. Vil du ikke ha flere påminnelser? <a href="${unsubUrl}" style="color:#8a8a84">Meld deg av her</a>.</p>`,
-    ),
-  }, "cart_reminder");
+    text,
+    html,
+  }, o.step === 2 ? "cart_reminder_2" : "cart_reminder");
 }

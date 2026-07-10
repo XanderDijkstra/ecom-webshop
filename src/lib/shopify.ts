@@ -4,9 +4,12 @@
 // custom-app Admin API token (write_orders, read_products) — server-only,
 // never exposed to the client.
 //
-// PER-STORE: update SHOPIFY_VARIANT_MAP and PRODUCT_GID below to match the
-// product imported into the new Shopify store. Verify variants by IMAGE, not
-// by name — supplier variant names are often wrong.
+// PER-STORE: fill SHOPIFY_VARIANT_MAP below for the product imported into the
+// new Shopify store. Verify variants by IMAGE, not by name — supplier variant
+// names are often wrong.
+
+import { getProduct } from "./products";
+import { bumpUnitPriceNok } from "./offers";
 
 const API_VERSION = "2024-10";
 
@@ -61,24 +64,13 @@ export async function shopifyGraphql<T = unknown>(
 }
 
 /**
- * baera.shop colour id (src/lib/products.ts) → nordved variant GID.
- * FILL THIS after the Bæreslyngen is imported via TeamDrop (read the GIDs with
- * the ?shopify=catalog diagnostic). While a colour is missing, orders containing
- * it are skipped (logged) rather than synced half-wrong.
+ * PER-STORE: webshop colour id (src/lib/products.ts) → Shopify variant GID.
+ * Fill this after the product is imported into the fulfilment store (read the
+ * GIDs with the ?shopify=catalog diagnostic) and VERIFY EACH VARIANT BY IMAGE
+ * — supplier variant names lie. While the map is empty (or a colour is
+ * missing), orders are skipped (logged) rather than synced half-wrong.
  */
-// Mapped by VISUAL comparison of variant photos (2026-07-06) — several
-// supplier names are misleading (our Blå is their "Bonsai blue", NOT
-// "Denim blue"). Product: "Portable Baby Waist Carrier with Front Hug
-// Design" (gid://shopify/Product/9246490853588).
-export const SHOPIFY_VARIANT_MAP: Record<string, string> = {
-  sort:       "gid://shopify/ProductVariant/48206189658324", // Pure black
-  aztec:      "gid://shopify/ProductVariant/48206189953236", // Ethnic flower
-  teddybear:  "gid://shopify/ProductVariant/48206190084308", // Baby bear
-  bla:        "gid://shopify/ProductVariant/48206189756628", // Bonsai blue
-  geometrisk: "gid://shopify/ProductVariant/48206190575828", // Starry sky
-  rutete:     "gid://shopify/ProductVariant/48206189822164", // Checkered blue
-  sebra:      "gid://shopify/ProductVariant/48206190117076", // Zebra print
-};
+export const SHOPIFY_VARIANT_MAP: Record<string, string> = {};
 
 export interface ShopifyOrderInput {
   /** Stripe/Vipps reference — used for the order note + idempotency tag. */
@@ -95,7 +87,13 @@ export interface ShopifyOrderInput {
     city?: string | null;
     country?: string | null;
   } | null;
-  items: { slug?: string; colorId?: string; qty?: number; bump?: boolean }[];
+  items: {
+    slug?: string;
+    colorId?: string;
+    qty?: number;
+    bump?: boolean;
+    free?: boolean;
+  }[];
 }
 
 export interface ShopifySyncResult {
@@ -107,9 +105,9 @@ export interface ShopifySyncResult {
 }
 
 /**
- * Create a paid order in the fulfilment Shopify (nordved) so TeamDrop ships it.
- * Customer notifications are OFF (baera.shop already confirmed the order); the
- * order is tagged `baera-web` and carries the payment reference in its note.
+ * Create a paid order in the fulfilment Shopify so the supplier ships it.
+ * Customer notifications are OFF (the webshop already confirmed the order);
+ * the order is tagged `webshop` and carries the payment reference in its note.
  */
 export async function createShopifyOrder(
   o: ShopifyOrderInput,
@@ -121,18 +119,74 @@ export async function createShopifyOrder(
     return { ok: false, skipped: "variant map empty (sling not mapped yet)" };
   }
 
-  const lineItems: { variantId: string; quantity: number }[] = [];
+  const currency = (o.currency || "NOK").toUpperCase();
+
+  // Each line carries the price the customer ACTUALLY paid on the webshop
+  // (BOGO/free item → 0, order bump → its discounted price, else catalogue
+  // price). Without the override Shopify prices every line at the variant's
+  // full price, so a paid BOGO order showed a phantom outstanding balance.
+  //
+  // Same-variant lines are GROUPED (qty summed, revenue averaged per unit):
+  // Shopify collapses duplicate-variant lines and silently dropped the 0.00
+  // one, which would have lost the freebie on a same-colour BOGO.
+  const grouped = new Map<string, { quantity: number; revenue: number }>();
   for (const it of o.items) {
     const variantId = SHOPIFY_VARIANT_MAP[it.colorId ?? ""];
     if (!variantId) {
       return { ok: false, skipped: `no variant mapping for colour "${it.colorId}"` };
     }
-    lineItems.push({
-      variantId,
-      quantity: Math.max(1, Math.floor(Number(it.qty) || 1)),
-    });
+    const qty = Math.max(1, Math.floor(Number(it.qty) || 1));
+    const unitPrice = it.free
+      ? 0
+      : it.bump
+        ? bumpUnitPriceNok()
+        : (getProduct(it.slug ?? "")?.priceNok ?? 0);
+    const g = grouped.get(variantId) ?? { quantity: 0, revenue: 0 };
+    g.quantity += qty;
+    g.revenue += unitPrice * qty;
+    grouped.set(variantId, g);
   }
+  // Reconcile against the real payment: older/backfilled orders don't carry
+  // free/bump flags on their items, so the flag-derived sum can exceed what
+  // the customer paid (e.g. BOGO stored as two full-price lines). Scale all
+  // line revenues so they add up to amountTotal exactly — the Shopify order
+  // then always shows fully PAID, whatever shape the discount had.
+  const expected = [...grouped.values()].reduce((s, g) => s + g.revenue, 0);
+  const paidTotal = o.amountTotal;
+  if (paidTotal != null && expected > 0 && Math.abs(expected - paidTotal) > 0.005) {
+    const factor = paidTotal / expected;
+    for (const g of grouped.values()) g.revenue *= factor;
+  }
+
+  const lineItems = [...grouped.entries()].map(([variantId, g]) => ({
+    variantId,
+    quantity: g.quantity,
+    priceSet: {
+      shopMoney: {
+        amount: (g.revenue / g.quantity).toFixed(2),
+        currencyCode: currency,
+      },
+    },
+  }));
   if (lineItems.length === 0) return { ok: false, skipped: "no line items" };
+
+  // toFixed rounding can drift a few øre off the paid total; absorb the
+  // difference in a qty-1 line so the sum matches to the øre.
+  if (paidTotal != null && lineItems.length > 0) {
+    const sum = lineItems.reduce(
+      (s, li) => s + Number(li.priceSet.shopMoney.amount) * li.quantity,
+      0,
+    );
+    const drift = Math.round((paidTotal - sum) * 100) / 100;
+    if (drift !== 0) {
+      const single = lineItems.find((li) => li.quantity === 1);
+      if (single) {
+        single.priceSet.shopMoney.amount = (
+          Number(single.priceSet.shopMoney.amount) + drift
+        ).toFixed(2);
+      }
+    }
+  }
 
   const nameParts = (o.name ?? "").trim().split(/\s+/).filter(Boolean);
   const firstName = nameParts[0] || "Kunde";
@@ -151,7 +205,6 @@ export async function createShopifyOrder(
     : undefined;
 
   const amount = (o.amountTotal ?? 0).toFixed(2);
-  const currency = (o.currency || "NOK").toUpperCase();
 
   const r = await shopifyGraphql<{
     orderCreate: {
@@ -172,13 +225,13 @@ export async function createShopifyOrder(
         lineItems,
         shippingAddress,
         billingAddress: shippingAddress,
-        note: `baera.shop ${o.reference} — customer paid ${amount} ${currency}`,
-        tags: ["baera-web"],
+        note: `webshop ${o.reference} — customer paid ${amount} ${currency}`,
+        tags: ["webshop"],
         transactions: [
           {
             kind: "SALE",
             status: "SUCCESS",
-            gateway: "baera.shop (Stripe/Vipps)",
+            gateway: "webshop (Stripe/Vipps)",
             amountSet: { shopMoney: { amount, currencyCode: currency } },
           },
         ],
@@ -250,4 +303,142 @@ export async function listShopifyCatalog() {
       }
     }
   }`);
+}
+
+export interface ShopifyOrderSummary {
+  id: string;
+  name: string;
+  createdAt: string;
+  cancelledAt: string | null;
+  displayFulfillmentStatus: string;
+  displayFinancialStatus: string;
+  note: string | null;
+  tags: string[];
+  customer: string | null;
+  lineItems: { title: string; variantTitle: string | null; quantity: number }[];
+}
+
+/** All orders in the fulfilment store, newest first (for the ops diagnostic). */
+export async function listShopifyOrders(): Promise<{
+  ok: boolean;
+  orders?: ShopifyOrderSummary[];
+  errors?: unknown;
+}> {
+  const res = await shopifyGraphql<{
+    orders: {
+      edges: {
+        node: {
+          id: string;
+          name: string;
+          createdAt: string;
+          cancelledAt: string | null;
+          displayFulfillmentStatus: string;
+          displayFinancialStatus: string;
+          note: string | null;
+          tags: string[];
+          customer: { displayName: string } | null;
+          lineItems: {
+            edges: {
+              node: {
+                title: string;
+                variantTitle: string | null;
+                quantity: number;
+              };
+            }[];
+          };
+        };
+      }[];
+    };
+  }>(`{
+    orders(first: 50, reverse: true) {
+      edges {
+        node {
+          id
+          name
+          createdAt
+          cancelledAt
+          displayFulfillmentStatus
+          displayFinancialStatus
+          note
+          tags
+          customer { displayName }
+          lineItems(first: 10) {
+            edges { node { title variantTitle quantity } }
+          }
+        }
+      }
+    }
+  }`);
+  if (!res.ok) return { ok: false, errors: res.errors };
+  return {
+    ok: true,
+    orders: (res.data?.orders.edges ?? []).map(({ node }) => ({
+      id: node.id,
+      name: node.name,
+      createdAt: node.createdAt,
+      cancelledAt: node.cancelledAt,
+      displayFulfillmentStatus: node.displayFulfillmentStatus,
+      displayFinancialStatus: node.displayFinancialStatus,
+      note: node.note,
+      tags: node.tags,
+      customer: node.customer?.displayName ?? null,
+      lineItems: (node.lineItems.edges ?? []).map((e) => e.node),
+    })),
+  };
+}
+
+/**
+ * Cancel + delete an order in the fulfilment store (used when re-syncing after
+ * a variant-map fix). Orders must be cancelled before Shopify allows deletion;
+ * cancellation is refund-free (manual gateway) and never notifies the customer
+ * (the webshop owns all customer communication). Returns per-step results.
+ */
+export async function deleteShopifyOrder(orderGid: string): Promise<{
+  ok: boolean;
+  cancelled?: boolean;
+  deletedId?: string | null;
+  errors?: unknown;
+}> {
+  const del = () =>
+    shopifyGraphql<{
+      orderDelete: { deletedId: string | null; userErrors: { message: string }[] };
+    }>(
+      `mutation($orderId: ID!) { orderDelete(orderId: $orderId) { deletedId userErrors { message } } }`,
+      { orderId: orderGid },
+    );
+
+  // Try a straight delete first (already-cancelled orders).
+  let res = await del();
+  if (res.data?.orderDelete?.deletedId) {
+    return { ok: true, cancelled: false, deletedId: res.data.orderDelete.deletedId };
+  }
+
+  // Cancel, then retry the delete a few times (cancellation runs as a job).
+  const cancel = await shopifyGraphql<{
+    orderCancel: { userErrors: { message: string }[] };
+  }>(
+    `mutation($orderId: ID!) {
+      orderCancel(orderId: $orderId, reason: OTHER, refund: false, restock: false, notifyCustomer: false) {
+        userErrors { message }
+      }
+    }`,
+    { orderId: orderGid },
+  );
+  const cancelErrors = cancel.data?.orderCancel?.userErrors ?? [];
+  if (!cancel.ok || cancelErrors.length > 0) {
+    return { ok: false, errors: cancel.errors ?? cancelErrors };
+  }
+
+  for (let i = 0; i < 4; i++) {
+    await new Promise((r) => setTimeout(r, 1500));
+    res = await del();
+    if (res.data?.orderDelete?.deletedId) {
+      return { ok: true, cancelled: true, deletedId: res.data.orderDelete.deletedId };
+    }
+  }
+  return {
+    ok: false,
+    cancelled: true,
+    errors: res.data?.orderDelete?.userErrors ?? res.errors,
+  };
 }

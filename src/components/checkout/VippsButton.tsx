@@ -11,8 +11,10 @@ import { useCart } from "@/components/cart/CartProvider";
  */
 export function VippsButton({
   bump,
+  coupon,
 }: {
   bump: { colorId: string } | null;
+  coupon: string | null;
 }) {
   const cart = useCart();
   const [busy, setBusy] = useState(false);
@@ -39,9 +41,7 @@ export function VippsButton({
             free: i.free,
           })),
           bump,
-          mc: "1",
-          fbp: readCookie("_fbp"),
-          fbc: readCookie("_fbc"),
+          coupon,
         }),
       });
       const data = await res.json();
@@ -80,10 +80,4 @@ export function VippsButton({
       )}
     </div>
   );
-}
-
-/** Read a browser cookie by name (client-side only). */
-function readCookie(name: string): string | null {
-  const m = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
-  return m ? decodeURIComponent(m[1]) : null;
 }

@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import {
   dueAbandonedCarts,
+  dueSecondReminders,
   markReminderSent,
+  markReminder2Sent,
   isEmail,
 } from "@/lib/abandoned";
 import { sendAbandonedCartEmail, sendOrderEmails } from "@/lib/email";
@@ -13,6 +15,8 @@ import { saleState } from "@/lib/sale";
 import { COMPANY } from "@/lib/company";
 import {
   listShopifyCatalog,
+  listShopifyOrders,
+  deleteShopifyOrder,
   shopifyConfigured,
   createShopifyOrder,
   SHOPIFY_VARIANT_MAP,
@@ -41,6 +45,7 @@ async function run() {
   const { live, endsAt } = saleState();
   if (!live) return { skipped: "sale ended", due: 0, sent: 0 };
 
+  // Step 1 — "Handlekurven venter på deg", ~30 min after abandon.
   const due = await dueAbandonedCarts(30, 100);
   let sent = 0;
   for (const c of due) {
@@ -55,13 +60,115 @@ async function run() {
       subtotal: c.subtotal,
       currency: c.currency ?? "NOK",
       saleEndsAt: endsAt,
+      step: 1,
     });
     if (res.ok) {
       await markReminderSent(c.id);
       sent++;
     }
   }
-  return { due: due.length, sent };
+
+  // Step 2 — "Tilbudet ditt står fortsatt" (final email), 24 h after step 1.
+  const due2 = await dueSecondReminders(24, 100);
+  let sent2 = 0;
+  for (const c of due2) {
+    if (!c.consent) {
+      await markReminder2Sent(c.id);
+      continue;
+    }
+    const res = await sendAbandonedCartEmail({
+      email: c.email,
+      items: c.items,
+      subtotal: c.subtotal,
+      currency: c.currency ?? "NOK",
+      saleEndsAt: endsAt,
+      step: 2,
+    });
+    if (res.ok) {
+      await markReminder2Sent(c.id);
+      sent2++;
+    }
+  }
+
+  return { due: due.length, sent, due2: due2.length, sent2 };
+}
+
+/**
+ * One-off sweep (?sweep=1): remind EVERY lead that added to cart but never
+ * purchased — including carts that already got their one automatic reminder
+ * (unlike run(), which only sends once per cart). Skips: converted carts,
+ * consent=false rows (unsubscribed — indistinguishable from banner-era
+ * decliners, so both are respected), emails with a paid order (belt & braces
+ * beyond converted_at), and carts touched in the last 30 min (still shopping).
+ * ?sweep=1&dry=1 lists the audience without sending anything.
+ */
+async function sweep(dry: boolean) {
+  const { live, endsAt } = saleState();
+  if (!live) return { skipped: "sale ended", audience: 0, sent: 0 };
+
+  const supabase = getSupabaseAdmin();
+  if (!supabase) return { error: "Database isn't configured." };
+
+  const cutoff = new Date(Date.now() - 30 * 60_000).toISOString();
+  const { data: carts, error } = await supabase
+    .from("abandoned_carts")
+    .select("*")
+    .is("converted_at", null)
+    .eq("consent", true)
+    .lte("updated_at", cutoff)
+    .order("updated_at", { ascending: true })
+    .limit(500);
+  if (error) return { error: error.message };
+
+  // Exclude anyone who has EVER paid, even if their cart row predates
+  // markCartConverted (early orders weren't linked back to carts).
+  const { data: orderRows } = await supabase
+    .from("orders")
+    .select("email,payment_status")
+    .limit(10000);
+  const buyers = new Set(
+    (orderRows ?? [])
+      .filter((o) => (o.payment_status ?? "").toLowerCase() === "paid")
+      .map((o) => (o.email ?? "").trim().toLowerCase())
+      .filter(Boolean),
+  );
+
+  const audience = (carts ?? []).filter(
+    (c) => !buyers.has(c.email.trim().toLowerCase()),
+  );
+
+  if (dry) {
+    return {
+      dry: true,
+      audience: audience.length,
+      recipients: audience.map((c) => ({
+        email: c.email,
+        items: Array.isArray(c.items) ? c.items.length : 0,
+        subtotal: c.subtotal,
+        captured: c.created_at,
+        remindedBefore: !!c.reminder_sent_at,
+      })),
+    };
+  }
+
+  let sent = 0;
+  const failed: string[] = [];
+  for (const c of audience) {
+    const res = await sendAbandonedCartEmail({
+      email: c.email,
+      items: c.items,
+      subtotal: c.subtotal,
+      currency: c.currency ?? "NOK",
+      saleEndsAt: endsAt,
+    });
+    if (res.ok) {
+      await markReminderSent(c.id);
+      sent++;
+    } else {
+      failed.push(c.email);
+    }
+  }
+  return { audience: audience.length, sent, failed };
 }
 
 /**
@@ -87,6 +194,21 @@ export async function GET(req: Request) {
   }
   const url = new URL(req.url);
   const tg = url.searchParams.get("telegram");
+
+  // List every order in the fulfilment Shopify with fulfillment status and
+  // line items. Usage: ?shopify=orders
+  if (url.searchParams.get("shopify") === "orders") {
+    return NextResponse.json(await listShopifyOrders());
+  }
+
+  // Cancel + delete one Shopify order (re-sync after a variant-map fix).
+  // Usage: ?shopify=delete&id=<numeric id or full gid>
+  if (url.searchParams.get("shopify") === "delete") {
+    const raw = url.searchParams.get("id") ?? "";
+    if (!raw) return NextResponse.json({ error: "pass ?id=…" }, { status: 400 });
+    const gid = raw.startsWith("gid://") ? raw : `gid://shopify/Order/${raw}`;
+    return NextResponse.json(await deleteShopifyOrder(gid));
+  }
 
   // Push an EXISTING recorded order (any provider — Stripe or Vipps) into the
   // fulfilment Shopify, reading straight from our orders table. No emails or
@@ -183,7 +305,12 @@ export async function GET(req: Request) {
         city: "Verdal",
         country: "NO",
       },
-      items: [{ slug: "baereslyngen", colorId, qty: 1 }],
+      // BOGO shape on purpose: one paid + one free line — verifies that the
+      // per-line price override keeps the order fully PAID in Shopify.
+      items: [
+        { slug: "baereslyngen", colorId, qty: 1 },
+        { slug: "baereslyngen", colorId, qty: 1, free: true },
+      ],
     });
     return NextResponse.json({ shopifyTestOrder: true, colorId, ...r });
   }
@@ -212,7 +339,7 @@ export async function GET(req: Request) {
   }
 
   // Backfill: pull PaymentIntents straight from Stripe and run them through the
-  // SAME recordOrder pipeline the webhook uses (orders + emails + CAPI +
+  // SAME recordOrder pipeline the webhook uses (orders + emails +
   // Telegram, deduped by stripe_session_id). For orders whose webhook delivery
   // never reached this app. Usage: ?backfill=pi_xxx,pi_yyy
   const backfill = url.searchParams.get("backfill");
@@ -240,9 +367,6 @@ export async function GET(req: Request) {
           paymentStatus: "paid",
           address: pi.shipping?.address ?? null,
           cart: pi.metadata?.cart,
-          mc: pi.metadata?.mc,
-          fbp: pi.metadata?.fbp ?? null,
-          fbc: pi.metadata?.fbc ?? null,
           method: "card",
         });
         results.push({ id, recorded: true, email: pi.receipt_email });
@@ -316,8 +440,6 @@ export async function GET(req: Request) {
       RESEND_API_KEY: !!process.env.RESEND_API_KEY?.trim(),
       ORDER_FROM: process.env.ORDER_FROM?.trim() || "(unset → onboarding@resend.dev)",
       ORDER_NOTIFY_TO: process.env.ORDER_NOTIFY_TO?.trim() || "(unset → hei@baera.shop)",
-      META_CAPI_ACCESS_TOKEN: !!process.env.META_CAPI_ACCESS_TOKEN?.trim(),
-      META_CAPI_TEST_EVENT_CODE: !!process.env.META_CAPI_TEST_EVENT_CODE?.trim(),
     };
     if (!supabase) return NextResponse.json({ env, log: null });
     const { data, error } = await supabase
@@ -386,6 +508,61 @@ export async function GET(req: Request) {
       method: "card",
     });
     return NextResponse.json({ telegramTest: true, ...r });
+  }
+
+  // Diagnostic: recent cart captures + their flow stamps, newest first.
+  // Usage: ?carts=1 — answers "did anyone reach checkout with an email today,
+  // and where is each lead in the reminder flow?"
+  if (url.searchParams.get("carts") === "1") {
+    const supabase = getSupabaseAdmin();
+    if (!supabase)
+      return NextResponse.json({ error: "DB not configured" }, { status: 503 });
+    const { data, error } = await supabase
+      .from("abandoned_carts")
+      .select(
+        "email,subtotal,consent,reminder_sent_at,reminder2_sent_at,converted_at,created_at,updated_at",
+      )
+      .order("updated_at", { ascending: false })
+      .limit(25);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const today = new Date().toISOString().slice(0, 10);
+    return NextResponse.json({
+      capturedToday: (data ?? []).filter((c) =>
+        (c.updated_at ?? "").startsWith(today),
+      ).length,
+      carts: data,
+    });
+  }
+
+  // Diagnostic: today's first-party funnel events (?funnel=1) — one line per
+  // PageView/AddToCart/InitiateCheckout with visitor id, path and time. Used to
+  // reconstruct what individual shoppers did (e.g. matching Clarity recordings
+  // against our own funnel when a cart never became an email capture).
+  if (url.searchParams.get("funnel") === "1") {
+    const supabase = getSupabaseAdmin();
+    if (!supabase)
+      return NextResponse.json({ error: "DB not configured" }, { status: 503 });
+    const dayStart = `${new Date().toISOString().slice(0, 10)}T00:00:00Z`;
+    const { data, error } = await supabase
+      .from("funnel_events")
+      .select("name,visitor_id,path,value,created_at")
+      .gte("created_at", dayStart)
+      .order("created_at", { ascending: true })
+      .limit(500);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const rows = data ?? [];
+    const byStage: Record<string, number> = {};
+    for (const r of rows) byStage[r.name] = (byStage[r.name] ?? 0) + 1;
+    return NextResponse.json({
+      today: byStage,
+      uniqueVisitors: new Set(rows.map((r) => r.visitor_id)).size,
+      events: rows.filter((r) => r.name !== "PageView"),
+      pageViews: rows.filter((r) => r.name === "PageView").length,
+    });
+  }
+
+  if (url.searchParams.get("sweep") === "1") {
+    return NextResponse.json(await sweep(url.searchParams.get("dry") === "1"));
   }
 
   const test = url.searchParams.get("test");

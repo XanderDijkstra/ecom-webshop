@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getStripe } from "@/lib/stripe";
-import { priceCart, readCapiMeta, parseBump, PricingError } from "@/lib/pricing";
+import { priceCart, parseBump, PricingError } from "@/lib/pricing";
+import { findValidCoupon, discountOre } from "@/lib/coupons";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,9 +9,7 @@ export const dynamic = "force-dynamic";
 /**
  * Creates a PaymentIntent for the custom (Payment Element) checkout. Prices and
  * the BOGO allowance are computed from the SERVER catalogue (see lib/pricing);
- * client amounts are never trusted. CAPI context (consent + _fbp/_fbc) is
- * stored on the intent's metadata so the webhook can send a matching
- * server-side Purchase.
+ * client amounts are never trusted.
  */
 export async function POST(req: Request) {
   let stripe;
@@ -37,15 +36,27 @@ export async function POST(req: Request) {
     );
   }
 
+  // Optional coupon — validated + applied SERVER-side. A total of 0 can't be
+  // charged by Stripe; the client must use the free-order flow instead.
+  let amountOre = priced.amountOre;
+  let couponCode: string | undefined;
+  const coupon = await findValidCoupon(body?.coupon);
+  if (coupon) {
+    amountOre = discountOre(amountOre, coupon.percent_off);
+    couponCode = coupon.code;
+    if (amountOre === 0) return NextResponse.json({ free: true });
+    if (amountOre < 300) amountOre = 300; // Stripe's ~3 NOK minimum charge
+  }
+
   let intent;
   try {
     intent = await stripe.paymentIntents.create({
-      amount: priced.amountOre,
+      amount: amountOre,
       currency: "nok",
       automatic_payment_methods: { enabled: true },
       metadata: {
         cart: JSON.stringify(priced.cartMeta).slice(0, 480),
-        ...readCapiMeta(body),
+        ...(couponCode ? { coupon: couponCode } : {}),
       },
     });
   } catch (err) {
@@ -59,6 +70,6 @@ export async function POST(req: Request) {
   return NextResponse.json({
     clientSecret: intent.client_secret,
     paymentIntentId: intent.id,
-    amount: priced.amountOre / 100,
+    amount: amountOre / 100,
   });
 }

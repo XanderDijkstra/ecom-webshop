@@ -102,19 +102,3 @@ export function priceCart(
   return { amountOre, cartMeta };
 }
 
-/**
- * Extract the Meta CAPI context (consent flag + _fbp/_fbc cookies) from a
- * checkout request body into a flat string map for payment metadata.
- */
-export function readCapiMeta(body: unknown): Record<string, string> {
-  const b = (body ?? {}) as Record<string, unknown>;
-  const str = (v: unknown) =>
-    typeof v === "string" ? v.slice(0, 200) : undefined;
-  const meta: Record<string, string> = {};
-  if (b.mc === "1") meta.mc = "1";
-  const fbp = str(b.fbp);
-  const fbc = str(b.fbc);
-  if (fbp) meta.fbp = fbp;
-  if (fbc) meta.fbc = fbc;
-  return meta;
-}

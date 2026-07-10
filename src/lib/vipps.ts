@@ -234,9 +234,6 @@ export async function finalizeVippsPayment(
     paymentStatus: "paid",
     address: u.address,
     cart: payment.metadata?.cart,
-    mc: payment.metadata?.mc,
-    fbp: payment.metadata?.fbp ?? null,
-    fbc: payment.metadata?.fbc ?? null,
     method: "vipps",
   });
 

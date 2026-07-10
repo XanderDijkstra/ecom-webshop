@@ -1,4 +1,4 @@
-// First-party, cookieless funnel analytics. Unlike track() (Meta pixel + CAPI),
+// First-party, cookieless funnel analytics. Unlike track() (Meta pixel),
 // this fires for EVERY visitor with no marketing-consent gate, and stores
 // nothing personal: just a random, first-party visitor id (localStorage), the
 // event name and the current path. It mirrors the top of the funnel into our

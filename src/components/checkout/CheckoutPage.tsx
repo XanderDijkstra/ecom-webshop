@@ -11,8 +11,14 @@ import { logFunnel } from "@/lib/analytics";
 import { getProduct } from "@/lib/products";
 import { ORDER_BUMP } from "@/lib/offers";
 import { CheckoutForm } from "./CheckoutForm";
+import { FreeOrderForm } from "./FreeOrderForm";
 import { OrderSummary } from "./OrderSummary";
 import { VippsButton } from "./VippsButton";
+
+export interface AppliedCoupon {
+  code: string;
+  percentOff: number;
+}
 
 const stripePromise = getStripeBrowser();
 
@@ -69,7 +75,69 @@ export function CheckoutPage() {
     on: false,
     colorId: "",
   });
+  const [coupon, setCoupon] = useState<AppliedCoupon | null>(null);
+  const [couponBusy, setCouponBusy] = useState(false);
+  const [couponError, setCouponError] = useState<string | null>(null);
   const startedRef = useRef(false);
+
+  // A 100% coupon makes the total 0 — Stripe/Vipps can't charge that, so the
+  // payment UI is swapped for the free-order form.
+  const freeOrder = !!coupon && coupon.percentOff >= 100;
+
+  /** Validate a code server-side, then sync the pending PaymentIntent. */
+  async function applyCoupon(code: string) {
+    setCouponBusy(true);
+    setCouponError(null);
+    try {
+      const res = await fetch("/api/coupon/validate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.valid) {
+        setCouponError(data.error || "Ugyldig rabattkode.");
+        return;
+      }
+      const applied = { code: data.code, percentOff: data.percentOff };
+      setCoupon(applied);
+      await syncIntent(applied);
+    } catch {
+      setCouponError("Noe gikk galt. Prøv igjen.");
+    } finally {
+      setCouponBusy(false);
+    }
+  }
+
+  async function removeCoupon() {
+    setCoupon(null);
+    setCouponError(null);
+    await syncIntent(null);
+  }
+
+  /** Re-price the pending PaymentIntent after a coupon change (best-effort). */
+  async function syncIntent(next: AppliedCoupon | null) {
+    if (!paymentIntentId || (next && next.percentOff >= 100)) return;
+    try {
+      await fetch("/api/payment-intent/update", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          paymentIntentId,
+          items: cart.items.map((i) => ({
+            slug: i.slug,
+            colorId: i.colorId,
+            qty: i.qty,
+            free: i.free,
+          })),
+          bump: bump.on ? { colorId: bumpColorId } : null,
+          coupon: next?.code ?? null,
+        }),
+      });
+    } catch {
+      /* the confirm-time update in CheckoutForm is the safety net */
+    }
+  }
 
   // Effective bump colour: explicit pick → first cart colour → first catalogue
   // colour. The bump is added at confirm time (card) / click time (Vipps), so
@@ -108,9 +176,6 @@ export function CheckoutPage() {
           qty: i.qty,
           free: i.free,
         })),
-        mc: "1",
-        fbp: readCookie("_fbp"),
-        fbc: readCookie("_fbc"),
       }),
     })
       .then(async (res) => {
@@ -161,9 +226,9 @@ export function CheckoutPage() {
       <div className="flex flex-col gap-7 lg:flex-row lg:items-start lg:gap-10">
         {/* Form (left on desktop, below summary on mobile) */}
         <div className="order-2 lg:order-1 lg:flex-1">
-          {vippsEnabled && (
+          {vippsEnabled && !freeOrder && (
             <div className="mb-6">
-              <VippsButton bump={bumpPayload} />
+              <VippsButton bump={bumpPayload} coupon={coupon?.code ?? null} />
               <div className="my-6 flex items-center gap-3 text-[12px] uppercase tracking-[0.08em] text-faint">
                 <span className="h-px flex-1 bg-line" />
                 eller betal med kort
@@ -172,7 +237,9 @@ export function CheckoutPage() {
             </div>
           )}
           <div className="rounded-2xl border border-line bg-white p-5 sm:p-7">
-            {!pk ? (
+            {freeOrder ? (
+              <FreeOrderForm bump={bumpPayload} coupon={coupon!.code} />
+            ) : !pk ? (
               <p className="text-[15px] text-muted">
                 Betaling er ikke konfigurert ennå.
               </p>
@@ -186,6 +253,7 @@ export function CheckoutPage() {
                 <CheckoutForm
                   paymentIntentId={paymentIntentId}
                   bump={bumpPayload}
+                  coupon={coupon}
                 />
               </Elements>
             ) : (
@@ -205,15 +273,14 @@ export function CheckoutPage() {
             bumpColorId={bumpColorId}
             onBumpToggle={(on) => setBump((b) => ({ ...b, on }))}
             onBumpColorChange={(colorId) => setBump((b) => ({ ...b, colorId }))}
+            coupon={coupon}
+            couponBusy={couponBusy}
+            couponError={couponError}
+            onApplyCoupon={applyCoupon}
+            onRemoveCoupon={removeCoupon}
           />
         </aside>
       </div>
     </main>
   );
-}
-
-/** Read a browser cookie by name (client-side only). */
-function readCookie(name: string): string | null {
-  const m = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
-  return m ? decodeURIComponent(m[1]) : null;
 }

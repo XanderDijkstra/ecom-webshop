@@ -81,12 +81,16 @@ in test mode and only mails your own address. Send-only domains can't
 Log in to `/admin` → **Settings → Tracking** and paste the IDs. No code, no
 redeploy — live within ~5 minutes (edge cache):
 
-- **Meta Pixel ID** — also set `META_CAPI_ACCESS_TOKEN` in Vercel for
-  server-side events (that one is a secret, so it stays an env var). Browser
-  pixel + CAPI share event IDs → deduplicated Browser+Server pairs in Events
-  Manager; Purchase fires server-side from the webhooks.
+- **Meta Pixel ID** — browser pixel only, by design (simple, single-source;
+  the Conversions API layer was deliberately removed). All standard events
+  fire from code: PageView, ViewContent, AddToCart, InitiateCheckout, and
+  Purchase on /takk. Verify with the Meta Pixel Helper extension or Events
+  Manager → Test events — never with the "Event Setup Tool" (that's for
+  sites without coded events and breaks the page render).
 - **Google tag** — GA4 `G-…`, Ads `AW-…` or `GT-…`.
-- **Microsoft Clarity** project ID.
+- **Microsoft Clarity** project ID. Also set `CLARITY_API_TOKEN` in Vercel
+  (Clarity → Settings → Data export) to light up the Clarity panel in
+  /admin → Insights.
 
 All three no-op while empty. The `NEXT_PUBLIC_*` env vars still work as hard
 overrides (the admin field locks when one is set).
