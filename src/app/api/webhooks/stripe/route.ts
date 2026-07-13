@@ -39,6 +39,8 @@ export async function POST(req: Request) {
       address: s.customer_details?.address ?? null,
       cart: s.metadata?.cart,
       method: "card",
+      fbp: s.metadata?.fbp ?? null,
+      fbc: s.metadata?.fbc ?? null,
     });
   } else if (event.type === "payment_intent.succeeded") {
     const pi = event.data.object as Stripe.PaymentIntent;
@@ -53,6 +55,8 @@ export async function POST(req: Request) {
       address: pi.shipping?.address ?? null,
       cart: pi.metadata?.cart,
       method: "card",
+      fbp: pi.metadata?.fbp ?? null,
+      fbc: pi.metadata?.fbc ?? null,
     });
   }
 

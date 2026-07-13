@@ -28,6 +28,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Handlekurven er tom." }, { status: 400 });
   }
 
+  // Meta Conversions API context, forwarded from the client and stored on the
+  // session so the Stripe webhook can send a matching server-side Purchase.
+  const str = (v: unknown) =>
+    typeof v === "string" ? v.slice(0, 200) : undefined;
+  const capiMeta: Record<string, string> = {};
+  const fbp = str(body?.fbp);
+  const fbc = str(body?.fbc);
+  if (fbp) capiMeta.fbp = fbp;
+  if (fbc) capiMeta.fbc = fbc;
 
   // Build line items from the SERVER catalogue; prices are never trusted from
   // the client.
@@ -127,6 +136,7 @@ export async function POST(req: Request) {
         cart: JSON.stringify(
           items.map((i) => ({ slug: i.slug, colorId: i.colorId, qty: i.qty })),
         ).slice(0, 480),
+        ...capiMeta,
       },
     });
   } catch (err) {

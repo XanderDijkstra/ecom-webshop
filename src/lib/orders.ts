@@ -1,15 +1,19 @@
 import { getSupabaseAdmin } from "./supabase";
+import { sendCapiPurchase } from "./capi";
 import { sendOrderEmails } from "./email";
 import { sendTelegramOrder } from "./telegram";
 import { createShopifyOrder } from "./shopify";
 import { markCartConverted } from "./abandoned";
+import { SITE } from "./site";
 
 // Shared order-recording pipeline. Both the Stripe webhook and the Vipps flow
 // normalise their provider payload into an OrderInput and call recordOrder().
-// It persists the order (dedup + upsert) and sends the admin + customer
-// emails — exactly once per order. Meta tracking is browser-pixel only (the
-// CAPI layer was removed 2026-07-09 for a simpler, single-source setup); the
-// Purchase event fires client-side on /takk via <PurchaseTracker>.
+// It persists the order (dedup + upsert), fires the Meta CAPI Purchase, and
+// sends the admin + customer emails — exactly once per order. The browser
+// pixel on /takk fires the same Purchase with the same event id, so Meta
+// dedupes the pair; the server copy is the one that survives closed tabs and
+// ad blockers (re-added 2026-07-13 after purchase-optimized ads had zero
+// attributable results).
 
 /** Provider-agnostic delivery address (superset of Stripe.Address / Vipps). */
 export interface OrderAddress {
@@ -34,6 +38,10 @@ export interface OrderInput {
   cart: string | undefined;
   /** "card" | "vipps" — surfaced in the admin email only (not persisted). */
   method?: string;
+  /** Meta _fbp cookie, forwarded via checkout metadata. Improves CAPI match. */
+  fbp?: string | null;
+  /** Meta _fbc click id cookie, forwarded via checkout metadata. */
+  fbc?: string | null;
 }
 
 /** Persist a paid order (when a DB is configured) and send notifications. */
@@ -79,6 +87,25 @@ export async function recordOrder(o: OrderInput) {
     await markCartConverted(order.email);
   }
 
+  // Meta Conversions API: server-side Purchase, deduplicated with the browser
+  // pixel via the order id as event_id. Only on the first sighting so webhook
+  // retries never inflate the count. Best-effort — no-ops without a token.
+  if (isNew && order.payment_status === "paid") {
+    await sendCapiPurchase({
+      eventId: o.id,
+      value: order.amount_total ?? 0,
+      currency: order.currency,
+      contentIds: cartSlugs(order.items),
+      eventSourceUrl: `${SITE.url}/takk`,
+      user: {
+        email: order.email,
+        phone: order.phone,
+        fbp: o.fbp,
+        fbc: o.fbc,
+      },
+    });
+  }
+
   // Notifications (admin email + customer confirmation + Telegram) — only on
   // the first sighting of a paid order, so retries never double-notify.
   if (isNew && order.payment_status === "paid") {
@@ -114,6 +141,21 @@ export async function recordOrder(o: OrderInput) {
       console.error("[shopify] order not synced:", JSON.stringify(sync));
     }
   }
+}
+
+/** Product slugs from the stored cart, for CAPI content_ids. */
+function cartSlugs(items: unknown): string[] {
+  if (!Array.isArray(items)) return ["baereslyngen"];
+  const slugs = [
+    ...new Set(
+      items
+        .map((i) =>
+          i && typeof i === "object" ? (i as { slug?: string }).slug : null,
+        )
+        .filter((s): s is string => typeof s === "string"),
+    ),
+  ];
+  return slugs.length ? slugs : ["baereslyngen"];
 }
 
 function safeParse(v: string | undefined) {

@@ -70,7 +70,9 @@ export async function shopifyGraphql<T = unknown>(
  * — supplier variant names lie. While the map is empty (or a colour is
  * missing), orders are skipped (logged) rather than synced half-wrong.
  */
-export const SHOPIFY_VARIANT_MAP: Record<string, string> = {};
+export const SHOPIFY_VARIANT_MAP: Record<string, string> = {
+  // colorId: "gid://shopify/ProductVariant/<fill-after-import>",
+};
 
 export interface ShopifyOrderInput {
   /** Stripe/Vipps reference — used for the order note + idempotency tag. */

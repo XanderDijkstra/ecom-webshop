@@ -37,6 +37,10 @@ export function useCheckout() {
             qty: i.qty,
             free: i.free,
           })),
+          // Meta cookies, stored on the Stripe session so the webhook can send
+          // a well-matched server-side Purchase (Conversions API).
+          fbp: readCookie("_fbp"),
+          fbc: readCookie("_fbc"),
         }),
       });
       const data = await res.json();
@@ -53,4 +57,10 @@ export function useCheckout() {
   }
 
   return { checkout, loading, error };
+}
+
+/** Read a browser cookie by name (client-side only). */
+function readCookie(name: string): string | null {
+  const m = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return m ? decodeURIComponent(m[1]) : null;
 }
