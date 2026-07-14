@@ -20,6 +20,11 @@ incrementally.
 the conversion blueprint every new store's copy, image cadence, offer and
 section order must follow.
 
+**→ Targeting the US? Follow
+[docs/methodology/US-MARKET-SEO.md](docs/methodology/US-MARKET-SEO.md)** —
+market config lives in `src/lib/site.ts`; the doc covers merchant listings,
+FTC review rules, ASTM safety claims, US search intent and AI-search strategy.
+
 ## What's included
 
 - **Storefront** — PDP with image gallery + variant switcher, cart drawer,

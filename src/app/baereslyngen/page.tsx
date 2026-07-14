@@ -17,7 +17,7 @@ import { Footer } from "@/components/store/Footer";
 import { CartDrawer } from "@/components/cart/CartDrawer";
 import { ThemeProvider } from "@/components/store/ThemeProvider";
 import { SLING } from "@/lib/products";
-import { SITE } from "@/lib/site";
+import { SITE, ogLocale } from "@/lib/site";
 
 const DESCRIPTION =
   "Bæreslyngen er en ergonomisk bæresele i pustende bomull, fra nyfødt til 25 kg. Ett enkelt grep, ingen spenner. Fri frakt over 500 kr og 90 dagers åpent kjøp.";
@@ -29,7 +29,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     siteName: SITE.name,
-    locale: SITE.locale,
+    locale: ogLocale(),
     url: `${SITE.url}/baereslyngen`,
     title: "Bæreslyngen - ergonomisk bæresele for nyfødt | BÆRA",
     description: DESCRIPTION,
@@ -78,7 +78,7 @@ const jsonLd = {
       offers: {
         "@type": "Offer",
         url: `${SITE.url}/baereslyngen`,
-        priceCurrency: "NOK",
+        priceCurrency: SITE.currency,
         price: SLING.priceNok,
         availability: "https://schema.org/InStock",
         priceValidUntil: "2026-12-31",
@@ -87,7 +87,7 @@ const jsonLd = {
         // (the product is 590 kr, above the 500 kr free-shipping threshold).
         hasMerchantReturnPolicy: {
           "@type": "MerchantReturnPolicy",
-          applicableCountry: "NO",
+          applicableCountry: SITE.country,
           returnPolicyCategory:
             "https://schema.org/MerchantReturnFiniteReturnWindow",
           merchantReturnDays: 90,
@@ -99,11 +99,11 @@ const jsonLd = {
           shippingRate: {
             "@type": "MonetaryAmount",
             value: 0,
-            currency: "NOK",
+            currency: SITE.currency,
           },
           shippingDestination: {
             "@type": "DefinedRegion",
-            addressCountry: "NO",
+            addressCountry: SITE.country,
           },
           deliveryTime: {
             "@type": "ShippingDeliveryTime",

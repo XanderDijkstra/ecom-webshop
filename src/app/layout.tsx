@@ -4,7 +4,7 @@ import "./globals.css";
 import { CartProvider } from "@/components/cart/CartProvider";
 import { FunnelTracker } from "@/components/FunnelTracker";
 import { TrackingScripts } from "@/components/TrackingScripts";
-import { SITE } from "@/lib/site";
+import { SITE, ogLocale } from "@/lib/site";
 
 const grotesk = Schibsted_Grotesk({
   variable: "--font-grotesk",
@@ -40,7 +40,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     siteName: SITE.name,
-    locale: SITE.locale,
+    locale: ogLocale(),
     url: SITE.url,
     title: "Bæresele & bæreslynge for nyfødt - BÆRA",
     description: DESCRIPTION,
@@ -56,7 +56,10 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="nb" className={`${grotesk.variable} ${instrument.variable}`}>
+    <html
+      lang={SITE.language}
+      className={`${grotesk.variable} ${instrument.variable}`}
+    >
       <body>
         {/* Tracking runs for all visitors (no consent gate — small-shop
             decision). IDs come from the admin Settings tab via
